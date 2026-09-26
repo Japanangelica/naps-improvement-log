@@ -274,15 +274,22 @@ function capture() {
 
 const toJpeg = (canvas) => new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
 
-/** 存原圖＋自動美化後的照片 */
+/** 存原圖＋自動美化後的照片；APK 版同時存到手機相簿 */
 async function savePhoto({ canvas, anchors }) {
   const original = await toJpeg(canvas);
-  const retouch = { enhance: true, legs: anchors ? state.legs : 0, anchors };
-  let blob = original;
-  try {
-    blob = await toJpeg(Retouch.render(canvas, canvas.width, canvas.height, retouch));
-  } catch (err) { console.warn('美化失敗，保留原圖', err); }
-  await db.add({ blob, original, retouch, createdAt: Date.now() });
+  const photo = { blob: original, createdAt: Date.now() };
+  if (settings.beautify) {
+    const retouch = { enhance: true, legs: anchors ? state.legs : 0, anchors };
+    try {
+      photo.blob = await toJpeg(Retouch.render(canvas, canvas.width, canvas.height, retouch));
+      photo.original = original;
+      photo.retouch = retouch;
+    } catch (err) { console.warn('美化失敗，保留原圖', err); }
+  }
+  photo.id = await db.add(photo);
+  if (isNative && settings.autosave && Native.Gallery) {
+    try { await saveToPhoneGallery(photo); } catch (err) { console.warn('存到手機相簿失敗', err); }
+  }
 }
 
 function flash() {
@@ -312,22 +319,110 @@ async function refreshThumb() {
   else img.removeAttribute('src');
 }
 
+/* 相簿：依日期分組、多選刪除／分享 */
+let galleryList = [];           // 目前相簿顯示的照片（新到舊），檢視時左右滑動用
+const selected = new Set();
+let selecting = false;
+
+function dayLabel(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86400000);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  const week = '日一二三四五六'[d.getDay()];
+  const md = `${d.getMonth() + 1}月${d.getDate()}日（${week}）`;
+  return d.getFullYear() === today.getFullYear() ? md : `${d.getFullYear()}年${md}`;
+}
+
+function formatMB(bytes) {
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(0.1, bytes / 1e6).toFixed(1)} MB`;
+}
+
 async function renderGallery() {
   revokeUrls();
-  const photos = (await db.all()).reverse();
+  galleryList = (await db.all()).reverse();
   const g = $('gallery');
   g.innerHTML = '';
-  $('count').textContent = photos.length ? `(${photos.length})` : '';
-  $('empty').classList.toggle('hidden', photos.length > 0);
-  for (const p of photos) {
+  g.classList.toggle('selecting', selecting);
+  $('count').textContent = galleryList.length ? `(${galleryList.length})` : '';
+  $('empty').classList.toggle('hidden', galleryList.length > 0);
+  $('btn-select').classList.toggle('hidden', galleryList.length === 0 && !selecting);
+
+  const bytes = galleryList.reduce((n, p) => n + (p.blob?.size || 0) + (p.original?.size || 0), 0);
+  const saved = galleryList.filter((p) => p.galleryUri).length;
+  $('storage-info').textContent = galleryList.length
+    ? `共 ${galleryList.length} 張 · App 內佔用約 ${formatMB(bytes)}` +
+      (isNative ? ` · ${saved} 張已存到手機相簿「拍照App」` : '')
+    : '';
+
+  let tiles = null, lastDay = null;
+  for (const p of galleryList) {
+    const day = dayLabel(p.createdAt);
+    if (day !== lastDay) {
+      const count = galleryList.filter((x) => dayLabel(x.createdAt) === day).length;
+      const h = document.createElement('h3');
+      h.className = 'day';
+      h.innerHTML = `${day}<small>${count} 張</small>`;
+      tiles = document.createElement('div');
+      tiles.className = 'tiles';
+      g.append(h, tiles);
+      lastDay = day;
+    }
+    const tile = document.createElement('button');
+    tile.className = 'tile' + (selected.has(p.id) ? ' selected' : '');
+    tile.setAttribute('aria-label', new Date(p.createdAt).toLocaleString('zh-TW'));
     const img = document.createElement('img');
     img.src = toUrl(p.blob);
     img.loading = 'lazy';
-    img.alt = new Date(p.createdAt).toLocaleString('zh-TW');
-    img.onclick = () => openViewer(p, img.src);
-    g.appendChild(img);
+    img.alt = '';
+    const badges = document.createElement('span');
+    badges.className = 'badges';
+    if (p.original) badges.insertAdjacentHTML('beforeend', '<span title="已美化">✨</span>');
+    if (p.galleryUri) badges.insertAdjacentHTML('beforeend', '<span title="已存到手機相簿">✓相簿</span>');
+    const check = document.createElement('span');
+    check.className = 'check';
+    tile.append(img, badges, check);
+    tile.onclick = () => {
+      if (selecting) {
+        if (selected.has(p.id)) selected.delete(p.id); else selected.add(p.id);
+        tile.classList.toggle('selected', selected.has(p.id));
+        updateSelectBar();
+      } else {
+        openViewer(p, img.src);
+      }
+    };
+    tiles.appendChild(tile);
   }
+  updateSelectBar();
 }
+
+function setSelecting(on) {
+  selecting = on;
+  selected.clear();
+  $('btn-select').textContent = on ? '取消' : '選取';
+  $('select-bar').classList.toggle('hidden', !on);
+  renderGallery();
+}
+
+function updateSelectBar() {
+  $('select-count').textContent = `已選 ${selected.size} 張`;
+  $('btn-select-share').disabled = selected.size === 0;
+  $('btn-select-delete').disabled = selected.size === 0;
+}
+
+$('btn-select').onclick = () => setSelecting(!selecting);
+$('btn-select-share').onclick = async () => {
+  const photos = galleryList.filter((p) => selected.has(p.id));
+  try { await shareFiles(photos); } catch { /* 使用者取消 */ }
+};
+$('btn-select-delete').onclick = async () => {
+  const photos = galleryList.filter((p) => selected.has(p.id));
+  if (!(await deletePhotos(photos))) return;
+  setSelecting(false);
+  refreshThumb();
+};
 
 let current = null;
 let viewerUrls = {};
@@ -337,8 +432,24 @@ function openViewer(photo, url) {
   viewerUrls = {};
   $('viewer-img').src = url;
   setupRetouchPanel(photo);
+  updateViewerMeta();
   $('btn-share').classList.toggle('hidden', !navigator.canShare && !isNative);
   $('viewer').showModal();
+}
+
+function updateViewerMeta() {
+  const i = galleryList.findIndex((p) => p.id === current?.id);
+  $('viewer-pos').textContent = i >= 0 ? `${i + 1} / ${galleryList.length}` : '';
+  $('viewer-saved').textContent = current?.galleryUri ? '✓ 已存到手機相簿' : '';
+  $('btn-download').textContent = isNative ? (current?.galleryUri ? '重新存到相簿' : '存到相簿') : '下載';
+}
+
+/** 左右滑動切換照片 */
+function stepViewer(dir) {
+  const i = galleryList.findIndex((p) => p.id === current?.id);
+  const next = galleryList[i + dir];
+  if (!next) return;
+  openViewer(next, toUrl(next.blob));
 }
 
 /* ---------- 美化面板：原圖／美化對照、長腿程度 ---------- */
@@ -380,8 +491,14 @@ async function applyLegs(pct) {
   if (viewerUrls.after) URL.revokeObjectURL(viewerUrls.after);
   viewerUrls.after = null;
   showBefore(false);
-  state.legs = retouch.legs || state.legs; // 記住喜歡的長腿程度，下次拍照沿用
-  try { localStorage.setItem('legs', String(state.legs)); } catch { /* 無法使用瀏覽器儲存 */ }
+  if (retouch.legs > 0) { // 記住喜歡的長腿程度，下次拍照沿用
+    settings.legs = Math.round(retouch.legs * 100);
+    applySettings();
+    saveSettings();
+  }
+  if (isNative && photo.galleryUri && Native.Gallery) {
+    try { await saveToPhoneGallery(photo); } catch (err) { console.warn('更新手機相簿失敗', err); }
+  }
 }
 
 $('btn-show-before').onclick = () => showBefore(true);
@@ -392,11 +509,27 @@ $('legs-slider').oninput = (e) => {
   clearTimeout(legsTimer);
   legsTimer = setTimeout(() => applyLegs(pct).catch((err) => console.warn(err)), 250);
 };
-// 按住照片看原圖，放開回到美化
-$('viewer-img').addEventListener('pointerdown', () => current?.original && showBefore(true));
-for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
-  $('viewer-img').addEventListener(ev, () => current?.original && showBefore(false));
+// 按住照片看原圖、放開回到美化；左右滑動換下一張
+let press = null;
+$('viewer-img').addEventListener('pointerdown', (e) => {
+  press = { x: e.clientX, y: e.clientY, comparing: false };
+  press.timer = setTimeout(() => {
+    if (press && current?.original) { press.comparing = true; showBefore(true); }
+  }, 250);
+});
+$('viewer-img').addEventListener('pointermove', (e) => {
+  if (press && Math.abs(e.clientX - press.x) > 12) clearTimeout(press.timer);
+});
+function endPress(e) {
+  if (!press) return;
+  clearTimeout(press.timer);
+  const dx = e.clientX - press.x, dy = e.clientY - press.y;
+  if (press.comparing) showBefore(false);
+  else if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) stepViewer(dx < 0 ? 1 : -1);
+  press = null;
 }
+$('viewer-img').addEventListener('pointerup', endPress);
+$('viewer-img').addEventListener('pointercancel', endPress);
 
 function fileName(p) {
   const d = new Date(p.createdAt);
@@ -588,43 +721,73 @@ $('btn-switch').onclick = () => {
   state.facingMode = state.facingMode === 'user' ? 'environment' : 'user';
   startCamera();
 };
-$('btn-grid').onclick = (e) => {
-  $('grid').classList.toggle('hidden');
-  e.currentTarget.classList.toggle('on');
-};
 $('btn-timer').onclick = (e) => {
   const next = { 0: 3, 3: 10, 10: 0 }[state.timer];
   state.timer = next;
-  $('timer-label').textContent = next ? ` ${next}s` : '';
+  $('timer-label').textContent = next || '';
   e.currentTarget.classList.toggle('on', next > 0);
 };
+$('btn-filter').onclick = () => $('filters').classList.toggle('hidden');
 $('filters').onclick = (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   document.querySelectorAll('#filters button').forEach((b) => b.classList.toggle('active', b === btn));
   state.filter = btn.dataset.filter;
   video.style.filter = state.filter === 'none' ? '' : state.filter;
+  $('btn-filter').classList.toggle('on', state.filter !== 'none');
 };
-$('btn-hints').onclick = (e) => {
-  state.hints = !state.hints;
-  e.currentTarget.classList.toggle('on', state.hints);
-  if (!state.hints && state.auto) $('btn-auto').click(); // 自動快門需要構圖提示
-  updateHint();
-};
-$('btn-auto').onclick = (e) => {
-  state.auto = !state.auto;
-  e.currentTarget.classList.toggle('on', state.auto);
-  if (state.auto && !state.hints) $('btn-hints').click();
+
+/* ---------- 拍照模式：自動 · 拍照 · 連拍 ---------- */
+function setMode(mode) {
+  state.mode = mode;
+  state.auto = mode === 'auto';
+  state.burst = mode === 'burst';
+  document.querySelectorAll('#modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  if (state.auto && !settings.hints) { settings.hints = true; applySettings(); } // 自動快門需要構圖提示
   stability.reset();
+  saveSettings();
   updateHint();
+}
+$('modes').onclick = (e) => {
+  const btn = e.target.closest('button[data-mode]');
+  if (btn) setMode(btn.dataset.mode);
 };
-$('btn-burst').onclick = (e) => {
-  state.burst = !state.burst;
-  $('burst-label').textContent = state.burst ? '×5' : '';
-  e.currentTarget.classList.toggle('on', state.burst);
-};
+
+/* ---------- 設定 ---------- */
+const settings = { hints: true, grid: false, beautify: true, legs: 8, autosave: true, mode: 'photo' };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('settings') || '{}')); } catch { /* 無法使用瀏覽器儲存 */ }
+
+function saveSettings() {
+  settings.mode = state.mode;
+  try { localStorage.setItem('settings', JSON.stringify(settings)); } catch { /* 無法使用瀏覽器儲存 */ }
+}
+
+function applySettings() {
+  state.hints = settings.hints;
+  state.legs = settings.legs / 100;
+  $('grid').classList.toggle('hidden', !settings.grid);
+  $('set-hints').checked = settings.hints;
+  $('set-grid').checked = settings.grid;
+  $('set-beautify').checked = settings.beautify;
+  $('set-legs').value = settings.legs;
+  $('set-legs-value').textContent = `+${settings.legs}%`;
+  $('row-legs').classList.toggle('hidden', !settings.beautify);
+  $('set-autosave').checked = settings.autosave;
+  $('row-autosave').classList.toggle('hidden', !isNative);
+  if (!settings.hints && state.auto) setMode('photo');
+  updateHint();
+}
+
+$('btn-settings').onclick = () => $('settings').showModal();
+$('btn-settings-close').onclick = () => $('settings').close();
+$('settings').addEventListener('click', (e) => { if (e.target === $('settings')) $('settings').close(); }); // 點面板外面關閉
+for (const [id, key] of [['set-hints', 'hints'], ['set-grid', 'grid'], ['set-beautify', 'beautify'], ['set-autosave', 'autosave']]) {
+  $(id).onchange = (e) => { settings[key] = e.target.checked; applySettings(); saveSettings(); };
+}
+$('set-legs').oninput = (e) => { settings.legs = Number(e.target.value); applySettings(); saveSettings(); };
+
 $('btn-gallery').onclick = () => showView('gallery');
-$('btn-tips').onclick = () => showView('tips');
+$('btn-tips').onclick = () => { $('settings').close(); showView('tips'); };
 document.querySelectorAll('.btn-back-camera').forEach((b) => { b.onclick = () => showView('camera'); });
 document.addEventListener('click', requestSensorPermission, { once: true });
 
@@ -642,46 +805,65 @@ function blobToBase64(blob) {
   });
 }
 
-async function nativeSave(photo) {
-  const path = `拍照App/${fileName(photo)}`;
-  await Native.Filesystem.writeFile({
-    path, data: await blobToBase64(photo.blob), directory: 'DOCUMENTS', recursive: true,
+/** 存到（或更新）手機相簿「Pictures/拍照App」，回傳相簿裡的 uri */
+async function saveToPhoneGallery(photo) {
+  const { uri } = await Native.Gallery.save({
+    data: await blobToBase64(photo.blob),
+    fileName: fileName(photo),
+    ...(photo.galleryUri ? { uri: photo.galleryUri } : {}),
   });
-  alert(`已儲存到「文件 / ${path}」`);
+  photo.galleryUri = uri;
+  await db.put(photo);
+  return uri;
 }
 
-async function nativeShare(photo) {
-  const { uri } = await Native.Filesystem.writeFile({
-    path: fileName(photo), data: await blobToBase64(photo.blob), directory: 'CACHE',
-  });
-  await Native.Share.share({ files: [uri], dialogTitle: '分享照片' });
+async function shareFiles(photos) {
+  if (isNative) {
+    const files = [];
+    for (const p of photos) {
+      const { uri } = await Native.Filesystem.writeFile({
+        path: fileName(p), data: await blobToBase64(p.blob), directory: 'CACHE',
+      });
+      files.push(uri);
+    }
+    await Native.Share.share({ files, dialogTitle: '分享照片' });
+    return;
+  }
+  const files = photos.map((p) => new File([p.blob], fileName(p), { type: 'image/jpeg' }));
+  if (navigator.canShare?.({ files })) await navigator.share({ files });
+  else alert('此裝置不支援分享照片，請改用「存到相簿」。');
+}
+
+async function deletePhotos(photos) {
+  const n = photos.length;
+  const msg = isNative
+    ? `刪除 App 裡的 ${n} 張照片？\n（已存到手機相簿的照片不會被刪除）`
+    : `確定要刪除 ${n} 張照片嗎？`;
+  if (!confirm(msg)) return false;
+  for (const p of photos) await db.remove(p.id);
+  return true;
 }
 
 $('btn-download').onclick = async () => {
   if (isNative) {
-    try { await nativeSave(current); } catch (err) { alert(`儲存失敗：${err.message}`); }
+    try {
+      await saveToPhoneGallery(current);
+      updateViewerMeta();
+      alert('已存到手機相簿「拍照App」');
+    } catch (err) { alert(`儲存失敗：${err.message}`); }
     return;
   }
   const a = document.createElement('a');
-  a.href = $('viewer-img').src;
+  a.href = URL.createObjectURL(current.blob);
   a.download = fileName(current);
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 $('btn-share').onclick = async () => {
-  if (isNative) {
-    try { await nativeShare(current); } catch { /* 使用者取消 */ }
-    return;
-  }
-  const file = new File([current.blob], fileName(current), { type: 'image/jpeg' });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file] }); } catch { /* 使用者取消 */ }
-  } else {
-    alert('此裝置不支援分享照片，請改用下載。');
-  }
+  try { await shareFiles([current]); } catch { /* 使用者取消 */ }
 };
 $('btn-delete').onclick = async () => {
-  if (!confirm('確定要刪除這張照片嗎？')) return;
-  await db.remove(current.id);
+  if (!(await deletePhotos([current]))) return;
   $('viewer').close();
   renderGallery();
   refreshThumb();
@@ -724,10 +906,10 @@ $('btn-copy-info').onclick = async () => {
 };
 
 /* ---------- 啟動 ---------- */
-try {
-  const saved = Number(localStorage.getItem('legs'));
-  if (saved > 0 && saved <= 0.15) state.legs = saved;
-} catch { /* 無法使用瀏覽器儲存 */ }
+applySettings();
+setMode(['auto', 'photo', 'burst'].includes(settings.mode) ? settings.mode : 'photo');
+navigator.storage?.persist?.().catch(() => {}); // 請瀏覽器不要自動清掉照片
+
 startCamera();
 refreshThumb();
 loadPoseDetector();

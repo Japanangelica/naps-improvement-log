@@ -12,6 +12,14 @@
 </head>
 <body>
   <main id="camera-view" class="view">
+    <div class="topbar">
+      <button id="btn-torch" class="icon hidden" aria-label="補光燈" title="補光燈"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></button>
+      <button id="btn-timer" class="icon" aria-label="倒數計時" title="倒數計時"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg><span id="timer-label" class="badge"></span></button>
+      <button id="btn-ratio" class="icon text" title="畫面比例">3:4</button>
+      <button id="btn-filter" class="icon" aria-label="濾鏡" title="濾鏡"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="6"/><circle cx="15" cy="9" r="6"/><circle cx="12" cy="15" r="6"/></svg></button>
+      <button id="btn-settings" class="icon" aria-label="設定" title="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+
     <div class="viewfinder" id="viewfinder">
       <div id="frame" class="frame">
         <video id="video" autoplay playsinline muted></video>
@@ -22,7 +30,7 @@
       <div id="countdown" class="countdown hidden"></div>
       <div id="flash" class="flash"></div>
       <div id="focus-ring" class="focus-ring"></div>
-      <div id="hint" class="hint tip">💡 準備中…</div>
+      <div id="hint" class="hint tip">準備中…</div>
       <div id="lens-bar" class="lens-bar hidden">
         <div id="zoom-levels" class="zoom-levels"></div>
         <button id="btn-lens" class="hidden">鏡頭</button>
@@ -30,7 +38,7 @@
       <p id="error" class="error hidden"></p>
     </div>
 
-    <div class="filters" id="filters">
+    <div class="filters hidden" id="filters">
       <button data-filter="none" class="active">原圖</button>
       <button data-filter="grayscale(1)">黑白</button>
       <button data-filter="sepia(0.8)">復古</button>
@@ -39,32 +47,46 @@
       <button data-filter="hue-rotate(200deg) saturate(0.8)">冷色</button>
     </div>
 
-    <div class="toolbar top">
-      <button id="btn-hints" class="on" title="構圖提示">💡 提示</button>
-      <button id="btn-torch" class="hidden" title="補光燈">🔦</button>
-      <button id="btn-auto" title="自動快門：構圖對了自動拍">自動</button>
-      <button id="btn-burst" title="連拍">連拍<span id="burst-label"></span></button>
-      <button id="btn-timer" title="倒數計時">⏱<span id="timer-label"></span></button>
-      <button id="btn-ratio" title="畫面比例">比例</button>
-      <button id="btn-grid" title="格線">＃</button>
-      <button id="btn-tips" title="拍照教學">📖</button>
-    </div>
+    <nav class="modes" id="modes" aria-label="拍照模式">
+      <button data-mode="auto" title="構圖對了、她站穩就自動拍">自動</button>
+      <button data-mode="photo" class="active">拍照</button>
+      <button data-mode="burst" title="一次拍 5 張">連拍</button>
+    </nav>
 
     <div class="controls">
-      <button id="btn-gallery" class="thumb" title="相簿"><img id="last-thumb" alt=""></button>
-      <button id="btn-shutter" class="shutter" title="拍照"><svg class="auto-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37"></circle></svg></button>
-      <button id="btn-switch" class="round" title="切換鏡頭">⇄</button>
+      <button id="btn-gallery" class="thumb" aria-label="相簿" title="相簿"><img id="last-thumb" alt=""></button>
+      <button id="btn-shutter" class="shutter" aria-label="拍照" title="拍照"><svg class="auto-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37"></circle></svg></button>
+      <button id="btn-switch" class="round" aria-label="切換前後鏡頭" title="切換前後鏡頭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg></button>
     </div>
   </main>
+
+  <dialog id="settings" class="sheet">
+    <div class="sheet-head">
+      <h2>設定</h2>
+      <button id="btn-settings-close" class="sheet-done">完成</button>
+    </div>
+    <label class="row"><span><b>構圖提示與導引</b><small>骨架、腳底目標線、方向箭頭</small></span><input type="checkbox" class="switch" id="set-hints" checked></label>
+    <label class="row"><span><b>九宮格線</b><small>幫助對齊水平與構圖</small></span><input type="checkbox" class="switch" id="set-grid"></label>
+    <label class="row"><span><b>自動美化</b><small>調亮、提升氣色、長腿</small></span><input type="checkbox" class="switch" id="set-beautify" checked></label>
+    <label class="row" id="row-legs"><span><b>長腿程度</b><small>拍照時預設套用</small></span><span class="range"><input type="range" id="set-legs" min="0" max="15" step="1" value="8"><output id="set-legs-value">+8%</output></span></label>
+    <label class="row" id="row-autosave"><span><b>自動存到手機相簿</b><small>三星相簿裡的「拍照App」相簿</small></span><input type="checkbox" class="switch" id="set-autosave" checked></label>
+    <button class="row link" id="btn-tips"><span><b>拍照教學</b><small>怎麼拍出好看的照片</small></span><span class="chev">›</span></button>
+  </dialog>
 
   <section id="gallery-view" class="view hidden">
     <header>
       <button class="btn-back-camera">← 返回</button>
       <h1>相簿 <small id="count"></small></h1>
-      <span></span>
+      <button id="btn-select" class="head-action">選取</button>
     </header>
+    <p id="storage-info" class="storage-info"></p>
     <div id="gallery" class="gallery"></div>
     <p id="empty" class="empty hidden">還沒有照片，回去拍一張吧！</p>
+    <div id="select-bar" class="select-bar hidden">
+      <span id="select-count">已選 0 張</span>
+      <button id="btn-select-share">分享</button>
+      <button id="btn-select-delete" class="danger">刪除</button>
+    </div>
   </section>
 
   <section id="tips-view" class="view hidden">
@@ -167,7 +189,8 @@
   </section>
 
   <dialog id="viewer">
-    <img id="viewer-img" alt="">
+    <div class="viewer-top"><span id="viewer-pos"></span><span id="viewer-saved" class="viewer-saved"></span></div>
+    <img id="viewer-img" alt="" draggable="false">
     <div id="retouch-panel" class="retouch-panel hidden">
       <div class="seg-toggle" role="group" aria-label="顯示">
         <button type="button" id="btn-show-before">原圖</button>
@@ -181,7 +204,7 @@
       <p id="retouch-note" class="retouch-note"></p>
     </div>
     <div class="viewer-actions">
-      <button id="btn-download">下載</button>
+      <button id="btn-download">存到相簿</button>
       <button id="btn-share">分享</button>
       <button id="btn-delete" class="danger">刪除</button>
       <button id="btn-close">關閉</button>
