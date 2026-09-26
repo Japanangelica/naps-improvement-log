@@ -16,6 +16,8 @@
       <div id="frame" class="frame">
         <video id="video" autoplay playsinline muted></video>
         <div id="grid" class="grid hidden"></div>
+        <canvas id="guide" class="guide"></canvas>
+        <div id="cue" class="cue hidden"><span class="cue-arrow"></span><span class="cue-text"></span></div>
       </div>
       <div id="countdown" class="countdown hidden"></div>
       <div id="flash" class="flash"></div>
@@ -40,6 +42,7 @@
     <div class="toolbar top">
       <button id="btn-hints" class="on" title="構圖提示">💡 提示</button>
       <button id="btn-torch" class="hidden" title="補光燈">🔦</button>
+      <button id="btn-auto" title="自動快門：構圖對了自動拍">自動</button>
       <button id="btn-burst" title="連拍">連拍<span id="burst-label"></span></button>
       <button id="btn-timer" title="倒數計時">⏱<span id="timer-label"></span></button>
       <button id="btn-ratio" title="畫面比例">比例</button>
@@ -49,7 +52,7 @@
 
     <div class="controls">
       <button id="btn-gallery" class="thumb" title="相簿"><img id="last-thumb" alt=""></button>
-      <button id="btn-shutter" class="shutter" title="拍照"></button>
+      <button id="btn-shutter" class="shutter" title="拍照"><svg class="auto-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37"></circle></svg></button>
       <button id="btn-switch" class="round" title="切換鏡頭">⇄</button>
     </div>
   </main>
@@ -165,6 +168,18 @@
 
   <dialog id="viewer">
     <img id="viewer-img" alt="">
+    <div id="retouch-panel" class="retouch-panel hidden">
+      <div class="seg-toggle" role="group" aria-label="顯示">
+        <button type="button" id="btn-show-before">原圖</button>
+        <button type="button" id="btn-show-after" class="active">✨ 美化</button>
+      </div>
+      <label class="legs" id="legs-row">
+        <span>長腿</span>
+        <input type="range" id="legs-slider" min="0" max="15" step="1" value="8">
+        <output id="legs-value">+8%</output>
+      </label>
+      <p id="retouch-note" class="retouch-note"></p>
+    </div>
     <div class="viewer-actions">
       <button id="btn-download">下載</button>
       <button id="btn-share">分享</button>
@@ -174,6 +189,8 @@
   </dialog>
 
   <script src="hints.js"></script>
+  <script src="retouch.js"></script>
+  <script src="guide.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

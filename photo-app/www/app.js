@@ -18,6 +18,8 @@ const state = {
   zoom: 1,
   torch: false,
   wakeLock: null,
+  auto: false,       // 自動快門
+  legs: 0.08,        // 自動長腿的預設加長比例
   ratio: null,       // 畫面比例（寬/高）：null = 原始
   settings: {},      // 目前鏡頭的實際解析度等設定
 };
@@ -63,6 +65,7 @@ const db = {
   },
   add(photo) { return this.tx('readwrite', (s) => s.add(photo)); },
   all() { return this.tx('readonly', (s) => s.getAll()); },
+  put(photo) { return this.tx('readwrite', (s) => s.put(photo)); },
   remove(id) { return this.tx('readwrite', (s) => s.delete(id)); },
 };
 
@@ -214,13 +217,14 @@ async function takePhoto() {
     $('countdown').classList.add('hidden');
 
     const shots = state.burst ? 5 : 1;
-    const pending = [];
+    const frames = [];
     for (let i = 0; i < shots; i++) {
       if (i) await new Promise((r) => setTimeout(r, 200));
-      pending.push(capture().then((blob) => db.add({ blob, createdAt: Date.now() })));
+      frames.push(capture());
       flash();
     }
-    await Promise.all(pending);
+    // 拍完再依序美化存檔，連拍時不會因為美化而拖慢拍攝間隔
+    for (const f of frames) await savePhoto(f);
     await refreshThumb();
   } finally {
     state.busy = false;
@@ -241,8 +245,10 @@ function layoutFrame() {
   frame.style.height = `${sh * scale}px`;
 }
 
+/** 拍下目前畫面，並記錄當下的人物位置（給自動美化用） */
 function capture() {
-  const { sx, sy, sw, sh } = currentCrop();
+  const crop = currentCrop();
+  const { sx, sy, sw, sh } = crop;
   const canvas = document.createElement('canvas');
   canvas.width = sw;
   canvas.height = sh;
@@ -253,7 +259,30 @@ function capture() {
     ctx.scale(-1, 1);
   }
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-  return new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
+
+  let anchors = null;
+  if (poseDetector) {
+    try {
+      const ts = Math.max(performance.now(), lastPoseTs + 1);
+      lastPoseTs = ts;
+      const lm = poseDetector.detectForVideo(video, ts).landmarks?.[0];
+      if (lm) anchors = Retouch.poseAnchors(Hints.mapPose(lm, video.videoWidth, video.videoHeight, crop));
+    } catch (err) { console.warn(err); }
+  }
+  return { canvas, anchors };
+}
+
+const toJpeg = (canvas) => new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
+
+/** 存原圖＋自動美化後的照片 */
+async function savePhoto({ canvas, anchors }) {
+  const original = await toJpeg(canvas);
+  const retouch = { enhance: true, legs: anchors ? state.legs : 0, anchors };
+  let blob = original;
+  try {
+    blob = await toJpeg(Retouch.render(canvas, canvas.width, canvas.height, retouch));
+  } catch (err) { console.warn('美化失敗，保留原圖', err); }
+  await db.add({ blob, original, retouch, createdAt: Date.now() });
 }
 
 function flash() {
@@ -301,11 +330,72 @@ async function renderGallery() {
 }
 
 let current = null;
+let viewerUrls = {};
 function openViewer(photo, url) {
   current = photo;
+  Object.values(viewerUrls).forEach((u) => URL.revokeObjectURL(u));
+  viewerUrls = {};
   $('viewer-img').src = url;
+  setupRetouchPanel(photo);
   $('btn-share').classList.toggle('hidden', !navigator.canShare && !isNative);
   $('viewer').showModal();
+}
+
+/* ---------- 美化面板：原圖／美化對照、長腿程度 ---------- */
+function setupRetouchPanel(photo) {
+  const has = !!photo.original;
+  $('retouch-panel').classList.toggle('hidden', !has);
+  if (!has) return;
+  const canLegs = !!photo.retouch?.anchors;
+  $('legs-row').classList.toggle('hidden', !canLegs);
+  const pct = Math.round((photo.retouch?.legs ?? 0) * 100);
+  $('legs-slider').value = pct;
+  $('legs-value').textContent = `+${pct}%`;
+  showBefore(false);
+  $('retouch-note').textContent = canLegs
+    ? '已自動調亮並拉長腿部，可用滑桿調整'
+    : '已自動調亮（這張沒有拍到完整的腰和腳，所以沒有做長腿）';
+}
+
+function showBefore(before) {
+  $('btn-show-before').classList.toggle('active', before);
+  $('btn-show-after').classList.toggle('active', !before);
+  if (!current?.original) return;
+  const key = before ? 'before' : 'after';
+  viewerUrls[key] ??= URL.createObjectURL(before ? current.original : current.blob);
+  $('viewer-img').src = viewerUrls[key];
+}
+
+let legsTimer;
+async function applyLegs(pct) {
+  const photo = current;
+  const bitmap = await createImageBitmap(photo.original);
+  const retouch = { ...photo.retouch, legs: pct / 100 };
+  const out = Retouch.render(bitmap, bitmap.width, bitmap.height, retouch);
+  bitmap.close?.();
+  photo.blob = await toJpeg(out);
+  photo.retouch = retouch;
+  await db.put(photo);
+  if (current !== photo) return;
+  if (viewerUrls.after) URL.revokeObjectURL(viewerUrls.after);
+  viewerUrls.after = null;
+  showBefore(false);
+  state.legs = retouch.legs || state.legs; // 記住喜歡的長腿程度，下次拍照沿用
+  try { localStorage.setItem('legs', String(state.legs)); } catch { /* 無法使用瀏覽器儲存 */ }
+}
+
+$('btn-show-before').onclick = () => showBefore(true);
+$('btn-show-after').onclick = () => showBefore(false);
+$('legs-slider').oninput = (e) => {
+  const pct = Number(e.target.value);
+  $('legs-value').textContent = `+${pct}%`;
+  clearTimeout(legsTimer);
+  legsTimer = setTimeout(() => applyLegs(pct).catch((err) => console.warn(err)), 250);
+};
+// 按住照片看原圖，放開回到美化
+$('viewer-img').addEventListener('pointerdown', () => current?.original && showBefore(true));
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+  $('viewer-img').addEventListener(ev, () => current?.original && showBefore(false));
 }
 
 function fileName(p) {
@@ -373,17 +463,33 @@ function readMotion() {
   const portrait = Math.abs(g.y) >= Math.abs(g.x);
   // 手機幾乎平放時，歪斜角度沒有意義
   const flat = Math.abs(g.z) > 0.8 * Math.hypot(g.x, g.y, g.z);
+  // 順時針歪斜角度（直拿時）：Android 直立時重力 y 為正
+  const roll = !flat && portrait ? Math.atan2(-g.x * Math.sign(g.y || 1), Math.abs(g.y)) * 180 / Math.PI : null;
   return {
     tilt: flat ? 0 : Hints.tiltFromGravity(g),
     pitchDown: Hints.pitchDownFromBeta(sensor.beta, portrait),
+    roll,
   };
+}
+
+const stability = new Guide.Stability({ holdMs: 1200 });
+let lastAutoShot = 0;
+
+function clearGuide() {
+  Guide.draw($('guide'), { hint: null });
+  $('cue').classList.add('hidden');
+  setAutoProgress(0);
+}
+
+function setAutoProgress(v) {
+  $('btn-shutter').style.setProperty('--auto', String(v));
 }
 
 function updateHint() {
   const el = $('hint');
   const active = state.hints && state.stream && video.videoWidth && !$('camera-view').classList.contains('hidden');
   el.classList.toggle('hidden', !active);
-  if (!active) return;
+  if (!active) { clearGuide(); return; }
 
   const crop = currentCrop();
   lightCtx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, lightCanvas.width, lightCanvas.height);
@@ -397,7 +503,8 @@ function updateHint() {
     pose = lm ? Hints.mapPose(lm, video.videoWidth, video.videoHeight, crop) : null;
   }
 
-  let hint = Hints.analyze({ light, motion: readMotion(), pose });
+  const motion = readMotion();
+  let hint = Hints.analyze({ light, motion, pose });
   if (hint.text.startsWith('太暗') && state.caps.torch && !state.torch) {
     hint = { ...hint, text: `${hint.text}，或打開上方 🔦 補光燈` };
   }
@@ -406,6 +513,28 @@ function updateHint() {
   }
   el.className = `hint ${hint.level}`;
   el.textContent = `${hint.level === 'ok' ? '✅' : hint.level === 'warn' ? '⚠️' : '💡'} ${hint.text}`;
+
+  // 畫面導引
+  Guide.draw($('guide'), { lm: pose, mirror: state.facingMode === 'user', hint, roll: motion?.roll ?? null });
+  const cue = Guide.cueFor(hint.code);
+  $('cue').className = cue ? `cue ${cue.dir}` : 'cue hidden';
+  if (cue) $('cue').querySelector('.cue-text').textContent = cue.text;
+
+  // 自動快門：構圖 OK 且她站穩 1.2 秒就自動拍，拍完休息 4 秒
+  if (state.auto) {
+    const now = performance.now();
+    const ready = hint.level === 'ok' && !state.busy && now - lastAutoShot > 4000;
+    const progress = stability.update(ready, pose, now);
+    setAutoProgress(progress);
+    if (progress >= 1) {
+      lastAutoShot = now;
+      stability.reset();
+      setAutoProgress(0);
+      takePhoto();
+    }
+  } else {
+    setAutoProgress(0);
+  }
 }
 
 /* ---------- 事件 ---------- */
@@ -479,6 +608,14 @@ $('filters').onclick = (e) => {
 $('btn-hints').onclick = (e) => {
   state.hints = !state.hints;
   e.currentTarget.classList.toggle('on', state.hints);
+  if (!state.hints && state.auto) $('btn-auto').click(); // 自動快門需要構圖提示
+  updateHint();
+};
+$('btn-auto').onclick = (e) => {
+  state.auto = !state.auto;
+  e.currentTarget.classList.toggle('on', state.auto);
+  if (state.auto && !state.hints) $('btn-hints').click();
+  stability.reset();
   updateHint();
 };
 $('btn-burst').onclick = (e) => {
@@ -491,7 +628,7 @@ $('btn-tips').onclick = () => showView('tips');
 document.querySelectorAll('.btn-back-camera').forEach((b) => { b.onclick = () => showView('camera'); });
 document.addEventListener('click', requestSensorPermission, { once: true });
 
-$('btn-close').onclick = () => $('viewer').close();
+$('btn-close').onclick = () => { $('viewer').close(); renderGallery(); refreshThumb(); };
 /* ---------- APK（Capacitor）原生功能 ---------- */
 const isNative = !!window.Capacitor?.isNativePlatform?.();
 const Native = window.Capacitor?.Plugins ?? {};
@@ -587,6 +724,10 @@ $('btn-copy-info').onclick = async () => {
 };
 
 /* ---------- 啟動 ---------- */
+try {
+  const saved = Number(localStorage.getItem('legs'));
+  if (saved > 0 && saved <= 0.15) state.legs = saved;
+} catch { /* 無法使用瀏覽器儲存 */ }
 startCamera();
 refreshThumb();
 loadPoseDetector();

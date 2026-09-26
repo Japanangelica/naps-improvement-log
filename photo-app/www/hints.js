@@ -46,45 +46,46 @@ function describePose(lm) {
  * @param {{mean:number, center:number, edges:number}} [input.light] 亮度 0–255
  * @param {{tilt:number, pitchDown:number|null}} [input.motion] 角度（度）
  * @param {Array<{x:number,y:number,visibility:number}>|null} [input.pose]
- * @returns {{level:'warn'|'tip'|'ok', text:string}}
+ * @returns {{level:'warn'|'tip'|'ok', code:string, text:string, body:object|null}}
  */
 function analyze({ light, motion, pose } = {}) {
   const hints = [];
-  const add = (priority, level, text) => hints.push({ priority, level, text });
+  const add = (priority, level, code, text) => hints.push({ priority, level, code, text });
 
   if (light) {
-    if (light.mean < 55) add(1, 'warn', '太暗了：找亮一點的地方，或讓她面向光源');
+    if (light.mean < 55) add(1, 'warn', 'dark', '太暗了：找亮一點的地方，或讓她面向光源');
     else if (light.edges > 170 && light.center < light.edges * 0.6) {
-      add(8, 'tip', '背光了：臉會黑黑的，換個方向讓光打在她臉上');
+      add(8, 'tip', 'backlight', '背光了：臉會黑黑的，換個方向讓光打在她臉上');
     }
   }
 
   if (motion) {
-    if (motion.tilt > 4) add(4, 'warn', `手機歪了 ${Math.round(motion.tilt)}°：拿正，水平線才不會斜`);
+    if (motion.tilt > 4) add(4, 'warn', 'tilt', `手機歪了 ${Math.round(motion.tilt)}°：拿正，水平線才不會斜`);
     if (motion.pitchDown != null && motion.pitchDown > 15) {
-      add(5, 'warn', '別從上往下拍！蹲低、手機放腰部高度，微微往上拍，腿會變長');
+      add(5, 'warn', 'pitch', '別從上往下拍！蹲低、手機放腰部高度，微微往上拍，腿會變長');
     }
   }
 
+  let p = null;
   if (pose) {
-    const p = describePose(pose);
-    if (p.headTop < 0) add(2, 'warn', '頭被切到了：往後退一步，或手機往上一點');
+    p = describePose(pose);
+    if (p.headTop < 0) add(2, 'warn', 'cut-head', '頭被切到了：往後退一步，或手機往上一點');
     if (!p.feetVisible && p.kneesVisible) {
-      add(3, 'warn', '腳被切到了：要嘛把腳底完整拍進來，要嘛只拍到大腿，別切在腳踝或小腿');
+      add(3, 'warn', 'cut-feet', '腳被切到了：要嘛把腳底完整拍進來，要嘛只拍到大腿，別切在腳踝或小腿');
     }
-    if (p.feetVisible && p.feetY > 0.99) add(3, 'warn', '腳底快出畫面了：手機往上一點點，把腳完整拍進來');
+    if (p.feetVisible && p.feetY > 0.99) add(3, 'warn', 'feet-edge', '腳底快出畫面了：手機往上一點點，把腳完整拍進來');
     if (p.feetVisible && p.feetY < 0.85) {
-      add(6, 'tip', '腳底離畫面下緣太遠：讓腳底貼近下緣，腿看起來更長');
+      add(6, 'tip', 'feet-far', '腳底離畫面下緣太遠：讓腳底貼近下緣，腿看起來更長');
     }
-    if (p.feetVisible && p.headTop > 0.4) add(7, 'tip', '頭頂上方空太多：手機往下壓一點，或走近一點');
-    if (p.height < 0.3) add(9, 'tip', '人太小了：走近一點，讓她占畫面多一點');
+    if (p.feetVisible && p.headTop > 0.4) add(7, 'tip', 'headroom', '頭頂上方空太多：手機往下壓一點，或走近一點');
+    if (p.height < 0.3) add(9, 'tip', 'small', '人太小了：走近一點，讓她占畫面多一點');
   }
 
   hints.sort((a, b) => a.priority - b.priority);
-  if (hints.length) return hints[0];
+  if (hints.length) return { ...hints[0], body: p };
   return pose
-    ? { level: 'ok', text: '構圖不錯，可以拍了！記得多拍幾張' }
-    : { level: 'tip', text: '把她放進畫面，我會幫你看構圖' };
+    ? { level: 'ok', code: 'ok', text: '構圖不錯，可以拍了！記得多拍幾張', body: p }
+    : { level: 'tip', code: 'no-person', text: '把她放進畫面，我會幫你看構圖', body: null };
 }
 
 /** 計算畫面亮度：整體、中央、四周 */

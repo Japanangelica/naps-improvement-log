@@ -31,6 +31,18 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .focus-ring { position: absolute; width: 72px; height: 72px; margin: -36px 0 0 -36px; border: 2px solid #ffcc00; border-radius: 50%; opacity: 0; pointer-events: none; }
 .focus-ring.show { animation: focus .9s ease-out; }
 @keyframes focus { 0% { opacity: 1; transform: scale(1.4); } 30% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+.guide { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cue { position: absolute; left: 50%; top: 10%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.7); }
+.cue-arrow { font-size: 56px; line-height: 1; font-weight: 900; }
+.cue-text { font-size: 18px; font-weight: 800; background: rgba(0,0,0,.45); padding: 4px 12px; border-radius: 999px; }
+.cue.down .cue-arrow::before { content: '↓'; }
+.cue.up .cue-arrow::before { content: '↑'; }
+.cue.in .cue-arrow::before { content: '⤢'; }
+.cue.level .cue-arrow::before { content: '⟲'; }
+.cue.down .cue-arrow, .cue.up .cue-arrow { animation: cue-bob 1s ease-in-out infinite; }
+.cue.up .cue-arrow { animation-direction: reverse; }
+@keyframes cue-bob { 0%, 100% { transform: translateY(-6px); } 50% { transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .cue .cue-arrow { animation: none !important; } }
 .error { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; line-height: 1.6; }
 
 .toolbar.top { position: absolute; top: env(safe-area-inset-top, 0); left: 0; right: 0; display: flex; gap: 6px; padding: 12px 16px; overflow-x: auto; scrollbar-width: none; }
@@ -44,6 +56,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .controls { display: flex; align-items: center; justify-content: space-between; padding: 14px 32px calc(20px + env(safe-area-inset-bottom, 0)); background: #111; }
 .shutter { width: 72px; height: 72px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px #111, 0 0 0 7px #fff; transition: transform .1s; }
 .shutter:active { transform: scale(.92); }
+.shutter { position: relative; }
+.auto-ring { position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; }
+.auto-ring circle { fill: none; stroke: #3ecf6e; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 232.5; stroke-dashoffset: calc(232.5 * (1 - var(--auto, 0))); transition: stroke-dashoffset .25s linear; }
 .round { width: 48px; height: 48px; border-radius: 50%; background: #262626; font-size: 22px; }
 .thumb { width: 48px; height: 48px; border-radius: 10px; overflow: hidden; background: #262626; }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -82,3 +97,13 @@ dialog::backdrop { background: rgba(0,0,0,.9); }
 .tips .note { color: #bbb; font-size: 14px; margin-bottom: 8px; }
 .device-info { background: #000; color: #9fe39f; padding: 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; }
 .copy-btn { margin-top: 8px; padding: 8px 14px; border-radius: 8px; background: #262626; }
+
+/* 美化面板 */
+.retouch-panel { display: grid; gap: 8px; padding: 10px 16px 0; }
+.seg-toggle { display: flex; justify-self: center; background: #262626; border-radius: 999px; padding: 3px; }
+.seg-toggle button { padding: 6px 16px; border-radius: 999px; font-size: 14px; }
+.seg-toggle button.active { background: #ffcc00; color: #111; font-weight: 700; }
+.legs { display: grid; grid-template-columns: auto 1fr 3.5em; align-items: center; gap: 10px; font-size: 14px; }
+.legs input { accent-color: #ffcc00; width: 100%; }
+.legs output { text-align: right; font-variant-numeric: tabular-nums; color: #ffcc00; font-weight: 700; }
+.retouch-note { font-size: 12px; color: #999; text-align: center; min-height: 1em; }
