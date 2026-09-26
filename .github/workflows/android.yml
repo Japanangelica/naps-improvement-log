@@ -1,0 +1,118 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths: ['photo-app/**', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['photo-app/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 連續推送時只保留最新一次編譯，避免兩次編譯同時更新下載連結而失敗
+concurrency:
+  group: android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: photo-app
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: photo-app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+      - run: npm test
+      - run: npx cap sync android
+
+      # 沒設定正式金鑰時，改用一把固定的「測試版金鑰」：第一次自動產生並存進 GitHub 快取，
+      # 之後每次編譯都沿用，更新 App 就不用先解除安裝。（快取只有這個 repo 的 workflow 讀得到）
+      - name: Restore preview signing key
+        if: env.ANDROID_KEYSTORE_BASE64 == ''
+        uses: actions/cache@v4
+        with:
+          path: ~/preview-signing/preview.keystore
+          key: photo-app-preview-keystore-v1
+
+      - name: Use preview signing key
+        if: env.ANDROID_KEYSTORE_BASE64 == ''
+        run: |
+          KS="$HOME/preview-signing/preview.keystore"
+          if [ ! -f "$KS" ]; then
+            mkdir -p "$(dirname "$KS")"
+            keytool -genkeypair -keystore "$KS" -alias preview -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass preview-only -keypass preview-only -dname "CN=Photo App Preview"
+            echo "Generated a new preview signing key"
+          else
+            echo "Reusing the cached preview signing key"
+          fi
+          keytool -list -keystore "$KS" -storepass preview-only | grep -i "fingerprint" || true
+          {
+            echo "ANDROID_KEYSTORE_PATH=$KS"
+            echo "PREVIEW_KEYSTORE_PASSWORD=preview-only"
+            echo "PREVIEW_KEY_ALIAS=preview"
+          } >> "$GITHUB_ENV"
+
+      - name: Use release keystore from secrets
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        working-directory: photo-app/android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || env.PREVIEW_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || env.PREVIEW_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || env.PREVIEW_KEYSTORE_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk ../photo-app.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photo-app-apk
+          path: photo-app/photo-app.apk
+
+      - name: Publish download link (main)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-latest --cleanup-tag --yes || true
+          gh release create apk-latest photo-app.apk \
+            --target "$GITHUB_SHA" \
+            --title "拍照 App 最新版 (1.0.${{ github.run_number }})" \
+            --notes "用 Android 手機下載 photo-app.apk 後點開安裝。第一次安裝需允許「安裝未知應用程式」。"
+
+      # PR 上的測試版：固定網址，手機可直接下載安裝（不會標成「最新版」）
+      - name: Publish preview download link (pull request)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-preview --cleanup-tag --yes || true
+          gh release create apk-preview photo-app.apk \
+            --prerelease \
+            --target "${{ github.event.pull_request.head.sha }}" \
+            --title "拍照 App 測試版 (PR #${{ github.event.pull_request.number }}, build ${{ github.run_number }})" \
+            --notes "實機測試用。用 Android 手機下載 photo-app.apk 後點開安裝。"

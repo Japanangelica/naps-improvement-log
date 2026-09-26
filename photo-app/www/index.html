@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <title>拍照 App</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="camera-view" class="view">
+    <div class="topbar">
+      <button id="btn-torch" class="icon hidden" aria-label="補光燈" title="補光燈"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></button>
+      <button id="btn-timer" class="icon" aria-label="倒數計時" title="倒數計時"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg><span id="timer-label" class="badge"></span></button>
+      <button id="btn-ratio" class="icon text" title="畫面比例">3:4</button>
+      <button id="btn-filter" class="icon" aria-label="濾鏡" title="濾鏡"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="6"/><circle cx="15" cy="9" r="6"/><circle cx="12" cy="15" r="6"/></svg></button>
+      <button id="btn-settings" class="icon" aria-label="設定" title="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+
+    <div class="viewfinder" id="viewfinder">
+      <div id="frame" class="frame">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="grid" class="grid hidden"></div>
+        <canvas id="guide" class="guide"></canvas>
+        <div id="cue" class="cue hidden"><span class="cue-arrow"></span><span class="cue-text"></span></div>
+      </div>
+      <div id="countdown" class="countdown hidden"></div>
+      <div id="flash" class="flash"></div>
+      <div id="focus-ring" class="focus-ring"></div>
+      <div id="hint" class="hint tip">準備中…</div>
+      <div id="toast" class="toast hidden" role="status"></div>
+      <div id="lens-bar" class="lens-bar hidden">
+        <div id="zoom-levels" class="zoom-levels"></div>
+        <button id="btn-lens" class="hidden">鏡頭</button>
+      </div>
+      <p id="error" class="error hidden"></p>
+    </div>
+
+    <div class="filters hidden" id="filters">
+      <button data-filter="none" class="active">原圖</button>
+      <button data-filter="grayscale(1)">黑白</button>
+      <button data-filter="sepia(0.8)">復古</button>
+      <button data-filter="saturate(1.8) contrast(1.1)">鮮豔</button>
+      <button data-filter="brightness(1.15) contrast(0.9)">柔亮</button>
+      <button data-filter="hue-rotate(200deg) saturate(0.8)">冷色</button>
+    </div>
+
+    <nav class="modes" id="modes" aria-label="拍照模式">
+      <button data-mode="auto" title="構圖對了、她站穩就自動拍">自動</button>
+      <button data-mode="photo" class="active">拍照</button>
+      <button data-mode="burst" title="一次拍 5 張">連拍</button>
+    </nav>
+
+    <div class="controls">
+      <span class="thumb-wrap">
+        <button id="btn-gallery" class="thumb" aria-label="相簿" title="相簿"><img id="last-thumb" alt=""></button>
+        <span id="queue-badge" class="queue-badge hidden" aria-live="polite"></span>
+      </span>
+      <button id="btn-shutter" class="shutter" aria-label="拍照" title="拍照"><svg class="auto-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37"></circle></svg></button>
+      <button id="btn-switch" class="round" aria-label="切換前後鏡頭" title="切換前後鏡頭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg></button>
+    </div>
+  </main>
+
+  <dialog id="settings" class="sheet">
+    <div class="sheet-head">
+      <h2>設定</h2>
+      <button id="btn-settings-close" class="sheet-done">完成</button>
+    </div>
+    <label class="row"><span><b>構圖提示與導引</b><small>骨架、腳底目標線、方向箭頭</small></span><input type="checkbox" class="switch" id="set-hints" checked></label>
+    <label class="row"><span><b>九宮格線</b><small>幫助對齊水平與構圖</small></span><input type="checkbox" class="switch" id="set-grid"></label>
+    <label class="row"><span><b>自動美化</b><small>構圖修正（裁掉太多的地板、天空）、長腿、瘦腰、小臉、美肌、背景虛化；程度會記住你在相簿最後的調整</small></span><input type="checkbox" class="switch" id="set-beautify" checked></label>
+    <button class="row link" id="btn-beauty-reset"><span><b>美化程度恢復預設</b><small id="beauty-summary"></small></span><span class="chev">↺</span></button>
+    <label class="row" id="row-autosave"><span><b>自動存到手機相簿</b><small>三星相簿裡的「拍照App」相簿</small></span><input type="checkbox" class="switch" id="set-autosave" checked></label>
+    <button class="row link" id="btn-tips"><span><b>拍照教學</b><small>怎麼拍出好看的照片</small></span><span class="chev">›</span></button>
+  </dialog>
+
+  <section id="gallery-view" class="view hidden">
+    <header>
+      <button class="btn-back-camera">← 返回</button>
+      <h1>相簿 <small id="count"></small></h1>
+      <span class="head-actions">
+        <label class="head-action import-btn" for="import-input">＋ 匯入</label>
+        <button id="btn-select" class="head-action">選取</button>
+      </span>
+    </header>
+    <input type="file" id="import-input" accept="image/*" multiple hidden>
+    <p id="import-status" class="import-status hidden" role="status"></p>
+    <p id="storage-info" class="storage-info"></p>
+    <div id="gallery" class="gallery"></div>
+    <div id="empty" class="empty hidden">
+      <p><b>用三星相機拍，再來這裡修圖</b></p>
+      <p>三星內建相機的畫質最好。拍完回到這裡按「匯入」，App 會自動修正構圖、長腿、美肌；一次選多張連拍，會自動挑出最好的一張。</p>
+      <label class="import-big" for="import-input">＋ 從相簿匯入照片</label>
+      <p class="empty-note">原本的照片不會被修改。</p>
+    </div>
+    <div id="select-bar" class="select-bar hidden">
+      <span id="select-count">已選 0 張</span>
+      <button id="btn-select-share">分享</button>
+      <button id="btn-select-delete" class="danger">刪除</button>
+    </div>
+  </section>
+
+  <section id="tips-view" class="view hidden">
+    <header>
+      <button class="btn-back-camera">← 返回</button>
+      <h1>拍照教學</h1>
+      <span></span>
+    </header>
+    <div class="tips">
+      <article class="best-way">
+        <h2>★ 最推薦的用法：三星相機拍、App 修</h2>
+        <ul>
+          <li>用<b>三星內建相機</b>拍（畫質最好，夜景、逆光都比較穩）。建議開連拍多拍幾張。</li>
+          <li>回到本 App → <b>相簿 → ＋ 匯入</b>，一次選多張。</li>
+          <li>App 會自動<b>修正構圖</b>（裁掉太多的地板、天空）、長腿、美肌，並從多張裡<b>挑出最好的一張</b>（有皇冠 👑）。</li>
+          <li>修好的照片會存在手機相簿的「拍照App」，原本的照片不會被修改。</li>
+        </ul>
+      </article>
+
+      <p class="lead">網路上教「男友怎麼幫女友拍照」的文章很多，整理出最常被提到、最有效的幾招。拍照時畫面上的 💡 提示也是依照這些原則判斷的。</p>
+
+      <article>
+        <h2>① 角度：蹲低，往上拍</h2>
+        <ul>
+          <li><b>不要站著往下拍</b>，俯拍會讓下半身被壓縮，看起來腿短、五五身。</li>
+          <li>蹲下來，手機放在<b>腰部到膝蓋的高度</b>，鏡頭<b>微微往上</b>，腿立刻變長。</li>
+          <li>往上的角度不要太誇張，否則會拍到下巴和鼻孔。</li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>② 構圖：腳底貼底線，頭上別空太多</h2>
+        <ul>
+          <li>拍全身照時，讓她的<b>腳底貼近畫面最下緣</b>。手機廣角鏡頭在畫面邊緣的拉伸效果最強，腿會被拉長。</li>
+          <li>不要在腳下留一大片地板。</li>
+          <li><b>不要切在關節</b>：腳踝、膝蓋、手腕被切掉會很怪；要嘛整個拍進去，要嘛切在大腿、小臂中段。</li>
+          <li>把她放在九宮格的線上，不一定要正中間。打開「＃」格線會比較好對。</li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>③ 光線：臉要朝著光</h2>
+        <ul>
+          <li>讓光打在她的臉上（順光），<b>避免背光</b>，否則臉會黑黑的。</li>
+          <li>中午的大太陽會在臉上留下濃重陰影；早上、傍晚或陰天的柔光最好看。</li>
+          <li>室內就靠近窗邊，用窗外的自然光。</li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>④ 背景：乾淨最重要</h2>
+        <ul>
+          <li>按快門前看一下背景：<b>電線桿、路人、垃圾桶</b>有沒有「從她頭上長出來」？</li>
+          <li>往旁邊移一步、換個角度，背景常常就乾淨了。</li>
+          <li>手機拿正，水平線和建築物的直線不要歪（畫面上的 💡 會提醒你）。</li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>⑤ 姿勢與表情：拍出自然感</h2>
+        <ul>
+          <li>請她<b>看向遠方</b>，或<b>微微抬下巴</b>，下顎線會更好看。</li>
+          <li><b>走路中抓拍</b>：請她慢慢走過來，腿在跨步時看起來最長。</li>
+          <li>撥頭髮、整理衣服、回頭的瞬間都很自然。</li>
+          <li>先逗她笑再拍，真心的笑容最好看。</li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>⑥ 不會被罵的關鍵習慣</h2>
+        <ul>
+          <li><b>多拍幾張</b>：打開「連拍」，一次拍 5 張，讓她自己挑。</li>
+          <li><b>拍之前先擦鏡頭</b>，手機鏡頭沾到指紋，照片就會霧霧的。</li>
+          <li>先問她喜歡哪一邊的臉、哪種角度，每個人都有自己的「好看角度」。</li>
+          <li>拍完<b>馬上給她看</b>，不滿意就當場重拍，不要回家才發現。</li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>⑦ S24 Ultra 專屬小技巧</h2>
+        <ul>
+          <li><b>拍全身、要腿長：用 1x</b>，蹲低往上拍、腳底貼下緣。</li>
+          <li><b>0.6x 超廣角</b>會讓畫面邊緣的東西被拉長：把腳放在畫面下緣可以讓腿更長，但<b>臉不要放在邊緣或角落</b>，否則會變形。靠太近拍臉也會變大餅臉。</li>
+          <li><b>半身、特寫：用 2x 或 3x</b>。人往後退幾步再放大，臉的比例最自然，背景也會比較模糊、乾淨。這是最不容易被罵的焦段。</li>
+          <li><b>5x</b> 適合拍遠一點的她和風景，背景的山、建築會被「拉近」，很有氣勢。</li>
+          <li>比例選 <b>9:16</b> 適合 IG／FB 限時動態，<b>1:1</b> 適合貼文，<b>3:4</b> 保留最多畫面，之後還能自己裁切。</li>
+          <li>晚上光線不夠時，開 <b>⏱ 3 秒倒數</b>，把手機靠在桌上或牆上，照片比較不會糊。</li>
+        </ul>
+      </article>
+
+      <article class="refs">
+        <h2>參考資料</h2>
+        <ul>
+          <li><a href="https://yanganstudio.com/mobile-photography-tips-long-legs/" target="_blank" rel="noopener">手機拍照技巧：如何拍出逆天長腿？3招告別五五身（男友必學）</a></li>
+          <li><a href="https://blog.magipea.com/photography002/" target="_blank" rel="noopener">情侶手機攝影技巧：訓練完美男友拍照 7 口訣</a></li>
+          <li><a href="https://blog.ofuphoto.com/2014/01/blog-post.html" target="_blank" rel="noopener">男友必學手機拍照技巧！iPhone 輕鬆拍出女友長腿</a></li>
+          <li><a href="https://doubleshe61116.pixnet.net/blog/post/466919042-5%E5%80%8B%E5%BF%85%E5%AD%B8%E6%8B%8D%E7%85%A7%E6%8A%80%E5%B7%A7%EF%BC%81%E4%B8%80%E6%AC%A1%E6%8E%8C%E6%8F%A1%E9%AB%98%E3%80%81%E7%98%A6%E3%80%81%E9%95%B7%EF%BC%81%E7%94%B7" target="_blank" rel="noopener">5 個必學拍照技巧！男友學完不會再被女友罵</a></li>
+          <li><a href="https://girlstyle.com/tw/article/172788/%E7%94%B7%E5%8F%8B%E4%B8%80%E7%A7%92%E8%AE%8A%E6%9A%96%E7%94%B7-%E5%AD%B8%E6%9C%83%E9%80%99%E5%B9%BE%E6%8B%9B%E7%B5%95%E7%BE%8E%E6%8B%8D%E7%85%A7-tips-%E5%B0%B1%E5%B0%8D%E4%BA%86-%E8%AE%93%E7%94%B7%E5%8F%8B%E5%B9%AB%E5%A6%B3%E6%8B%8D%E5%87%BA-%E5%A5%B3%E7%A5%9E%E7%B4%9A-%E7%BE%8E%E7%85%A7-%E6%84%9F%E6%83%85%E6%BA%AB%E5%BA%A6%E7%9B%B4%E6%8E%A5%E9%A3%86%E5%8D%87" target="_blank" rel="noopener">GirlStyle：讓男友幫妳拍出女神級美照</a></li>
+          <li><a href="https://www.purewow.com/beauty/how-to-look-taller-in-pictures" target="_blank" rel="noopener">PureWow：How to Look Taller in Pictures</a></li>
+          <li><a href="https://melmagazine.com/en-us/story/how-to-take-pictures-of-your-girlfriend-that-she-wont-hate" target="_blank" rel="noopener">MEL：How to Take Pictures of Your Girlfriend That She Won’t Hate</a></li>
+        </ul>
+      </article>
+      <article class="refs">
+        <h2>相機資訊</h2>
+        <p class="note">如果某個功能在你的手機上怪怪的，可以把下面的資訊複製給開發者，方便針對機型調整。</p>
+        <pre id="device-info" class="device-info"></pre>
+        <button id="btn-copy-info" class="copy-btn">複製相機資訊</button>
+      </article>
+    </div>
+  </section>
+
+  <dialog id="viewer">
+    <div class="viewer-top"><span id="viewer-pos"></span><span id="viewer-saved" class="viewer-saved"></span></div>
+    <img id="viewer-img" alt="" draggable="false">
+    <div id="retouch-panel" class="retouch-panel hidden">
+      <div class="seg-toggle" role="group" aria-label="顯示">
+        <button type="button" id="btn-show-before">原圖</button>
+        <button type="button" id="btn-show-after" class="active">✨ 美化</button>
+      </div>
+      <div class="beauty-tabs" id="beauty-tabs" role="tablist" aria-label="美化項目">
+        <button type="button" role="tab" data-key="frame">構圖</button>
+        <button type="button" role="tab" data-key="legs">長腿</button>
+        <button type="button" role="tab" data-key="waist">瘦腰</button>
+        <button type="button" role="tab" data-key="face">小臉</button>
+        <button type="button" role="tab" data-key="skin">美肌</button>
+        <button type="button" role="tab" data-key="blur">背景虛化</button>
+      </div>
+      <label class="legs" id="beauty-row">
+        <span id="beauty-label">長腿</span>
+        <input type="range" id="beauty-slider" min="0" max="100" step="1" value="0">
+        <output id="beauty-value">0</output>
+      </label>
+      <p id="retouch-note" class="retouch-note"></p>
+    </div>
+    <div class="viewer-actions">
+      <button id="btn-download">存到相簿</button>
+      <button id="btn-share">分享</button>
+      <button id="btn-delete" class="danger">刪除</button>
+      <button id="btn-close">關閉</button>
+    </div>
+  </dialog>
+
+  <script src="hints.js"></script>
+  <script src="retouch.js"></script>
+  <script src="beauty.js"></script>
+  <script src="guide.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
