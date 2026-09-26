@@ -11,6 +11,11 @@ on:
 permissions:
   contents: write
 
+# 連續推送時只保留最新一次編譯，避免兩次編譯同時更新下載連結而失敗
+concurrency:
+  group: android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
