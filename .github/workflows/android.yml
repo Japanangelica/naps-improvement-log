@@ -37,6 +37,14 @@ jobs:
       - run: npm test
       - run: npx cap sync android
 
+      # 沒設定正式金鑰時，沿用同一把 debug 金鑰，更新 App 不用先解除安裝
+      - name: Keep the same debug signing key between builds
+        if: env.ANDROID_KEYSTORE_BASE64 == ''
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
       - name: Use release keystore from secrets
         if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
