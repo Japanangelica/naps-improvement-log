@@ -22,7 +22,7 @@ const FEATURES = {
 const NOSE_TIP = 1, CHIN = 152, CHEEK_L = 234, CHEEK_R = 454;
 
 /** 預設美化程度（0–100；長腿為 0–15 的百分比） */
-const DEFAULTS = { legs: 8, face: 30, waist: 25, skin: 40, blur: 35 };
+const DEFAULTS = { legs: 6, face: 25, waist: 15, skin: 30, blur: 20 };
 
 /* ---------- 形狀調整（小臉、瘦腰）：逐列水平壓縮 ---------- */
 
@@ -65,19 +65,21 @@ function faceBand(face, W, H) {
   };
 }
 
-/** 瘦腰：肩膀到髖部之間，最細處在腰 */
+/** 瘦腰：肩膀到髖部之間，最細處在腰。側身時兩肩太靠近，不處理（會變形） */
 function waistBand(a, W, H) {
   if (!a || a.shoulderY == null) return null;
   const sh = a.shoulderY * H, hip = a.hipY * H;
   if (hip - sh < 20) return null;
+  const torso = hip - sh;
+  if (a.shoulderHalf * W < torso * 0.22) return null; // 側身
   const half = Math.max(a.hipHalf * W * 1.5, a.shoulderHalf * W * 0.85);
   return {
     cx: ((a.hipX + a.shoulderX) / 2) * W,
     top: sh + (hip - sh) * 0.3,
     bottom: hip + (hip - sh) * 0.2,
     w: half,
-    R: half * 1.8,
-    maxK: 0.07,
+    R: half * 2.2,
+    maxK: 0.06,
   };
 }
 
@@ -151,18 +153,14 @@ function bestReason(s) {
 /* ---------- 瀏覽器端：分析與繪製 ---------- */
 
 function copyCanvas(src, W, H) {
-  const c = document.createElement('canvas');
-  c.width = W;
-  c.height = H;
+  const c = makeCanvas(W, H);
   c.getContext('2d').drawImage(src, 0, 0, W, H);
   return c;
 }
 
 function scaled(src, W, H, max) {
   const k = Math.min(1, max / Math.max(W, H));
-  const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.round(W * k));
-  c.height = Math.max(1, Math.round(H * k));
+  const c = makeCanvas(Math.max(1, Math.round(W * k)), Math.max(1, Math.round(H * k)));
   c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
   return c;
 }
@@ -172,8 +170,8 @@ function scaled(src, W, H, max) {
  * @param {HTMLCanvasElement} canvas 原圖
  * @param {{segmenter?, face?}} models MediaPipe 的 ImageSegmenter / FaceLandmarker（IMAGE 模式）
  */
-function analyze(canvas, models) {
-  const small = scaled(canvas, canvas.width, canvas.height, 1024);
+function analyze(canvas, models, { sharpness: withSharpness = true } = {}) {
+  const small = scaled(canvas, canvas.width, canvas.height, 768);
   const out = { face: null, blink: null, smile: null, mask: null, sharp: 0 };
 
   if (models.face) {
@@ -199,6 +197,7 @@ function analyze(canvas, models) {
     } catch (err) { console.warn('人物分割失敗', err); }
   }
 
+  if (!withSharpness) return out;
   // 清晰度：縮到 200px 寬的灰階
   const g = scaled(canvas, canvas.width, canvas.height, 200);
   const { data } = g.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, g.width, g.height);
@@ -222,36 +221,39 @@ function shrinkMask(data, w, h, max) {
 
 /** 依分類做出遮罩（放大到照片尺寸，邊緣柔化） */
 function maskCanvas(mask, cats, W, H, feather) {
-  const m = document.createElement('canvas');
-  m.width = mask.w;
-  m.height = mask.h;
+  const m = makeCanvas(mask.w, mask.h);
   const ctx = m.getContext('2d');
   const img = ctx.createImageData(mask.w, mask.h);
   for (let i = 0; i < mask.data.length; i++) {
     if (cats.includes(mask.data[i])) img.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  const out = document.createElement('canvas');
-  out.width = W;
-  out.height = H;
+  const out = makeCanvas(W, H);
   const o = out.getContext('2d');
   o.filter = `blur(${Math.max(1, feather)}px)`;
   o.drawImage(m, 0, 0, W, H);
   return out;
 }
 
-/** 模糊版影像：先縮小再模糊再放大，速度快 */
+/**
+ * 模糊版影像：先縮小再模糊再放大，速度快。
+ * 四周先延伸一圈再模糊，照片邊緣才不會出現條紋。
+ */
 function blurred(src, W, H, factor, radius) {
-  const s = document.createElement('canvas');
-  s.width = Math.max(1, Math.round(W / factor));
-  s.height = Math.max(1, Math.round(H / factor));
+  const sw = Math.max(1, Math.round(W / factor)), sh = Math.max(1, Math.round(H / factor));
+  const pad = Math.ceil(radius * 3) + 2;
+  const s = makeCanvas(sw + pad * 2, sh + pad * 2);
   const g = s.getContext('2d');
-  g.filter = `blur(${radius}px)`;
-  g.drawImage(src, 0, 0, s.width, s.height);
-  const out = document.createElement('canvas');
-  out.width = W;
-  out.height = H;
-  out.getContext('2d').drawImage(s, 0, 0, W, H);
+  g.drawImage(src, 0, 0, s.width, s.height); // 延伸邊緣
+  g.drawImage(src, pad, pad, sw, sh);
+  const b = makeCanvas(s.width, s.height);
+  const bg = b.getContext('2d');
+  bg.filter = `blur(${radius}px)`;
+  bg.drawImage(s, 0, 0);
+  const out = makeCanvas(W, H);
+  const o = out.getContext('2d');
+  o.imageSmoothingQuality = 'high';
+  o.drawImage(b, pad, pad, sw, sh, 0, 0, W, H);
   return out;
 }
 
@@ -291,13 +293,22 @@ function smoothSkin(base, W, H, info, strength) {
   return out;
 }
 
-/** 背景虛化：人物清楚、背景模糊 */
+/**
+ * 背景虛化：人物清楚、背景模糊。
+ * 先把人物挖掉只模糊背景，人物的顏色就不會暈到背景上（避免人物外圍一圈光暈）。
+ */
 function blurBackground(base, W, H, info, strength) {
-  const bg = maskCanvas(info.mask, [CAT.BACKGROUND], W, H, W / 250);
-  const radius = Math.max(1, (W / 4) * (0.004 + 0.016 * strength));
-  const layer = withMask(blurred(base, W, H, 4, radius), bg);
+  const hard = maskCanvas(info.mask, [CAT.BACKGROUND], W, H, 1);
+  const bgOnly = withMask(copyCanvas(base, W, H), hard);
+  const radius = Math.max(1, (W / 3) * (0.003 + 0.012 * strength));
+  const soft = blurred(bgOnly, W, H, 3, radius);
+  // 挖掉人物的地方模糊後會變半透明，重疊幾次補回不透明度（顏色只來自背景）
+  const filled = makeCanvas(W, H);
+  const f = filled.getContext('2d');
+  for (let i = 0; i < 4; i++) f.drawImage(soft, 0, 0);
+  const feather = maskCanvas(info.mask, [CAT.BACKGROUND], W, H, W / 400);
   const out = copyCanvas(base, W, H);
-  out.getContext('2d').drawImage(layer, 0, 0);
+  out.getContext('2d').drawImage(withMask(filled, feather), 0, 0);
   return out;
 }
 

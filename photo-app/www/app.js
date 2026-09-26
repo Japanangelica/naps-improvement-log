@@ -10,7 +10,7 @@ const state = {
   burst: false,       // 連拍 5 張
   hints: true,
   stream: null,
-  busy: false,
+  capturing: false,  // 倒數與拍攝期間（不含背景美化）
   track: null,
   caps: {},          // 目前鏡頭支援的功能（變焦、補光燈、對焦…）
   backCams: [],      // 三星等多鏡頭手機的後鏡頭清單（超廣角、主鏡頭、望遠）
@@ -204,9 +204,14 @@ function showError(msg) {
 }
 
 /* ---------- 拍照 ---------- */
+/*
+ * 拍照：按下快門立刻震動、閃白、縮圖更新，馬上可以拍下一張；
+ * AI 分析與美化排隊在背景處理，不會卡住相機。
+ */
 async function takePhoto() {
-  if (state.busy || !state.stream || !video.videoWidth) return;
-  state.busy = true;
+  if (state.capturing || !state.stream || !video.videoWidth) return;
+  state.capturing = true;
+  pressFeedback();
   try {
     for (let n = state.timer; n > 0; n--) {
       $('countdown').textContent = n;
@@ -219,18 +224,87 @@ async function takePhoto() {
     const frames = [];
     for (let i = 0; i < shots; i++) {
       if (i) await new Promise((r) => setTimeout(r, 200));
-      frames.push(capture());
+      const f = capture();
+      frames.push(f);
       flash();
+      showQuickThumb(f.canvas);
     }
-    // 拍完再依序美化存檔，連拍時不會因為美化而拖慢拍攝間隔
-    if (frames.length > 1) showToast('美化中，並從連拍挑出最佳一張…');
-    const saved = [];
-    for (const f of frames) saved.push(await savePhoto(f));
-    if (saved.length > 1) await markBestShot(saved);
-    await refreshThumb();
+    enqueue(frames);
   } finally {
-    state.busy = false;
+    state.capturing = false;
   }
+}
+
+/** 按下快門的即時回饋：按鈕縮一下＋震動 */
+function pressFeedback() {
+  navigator.vibrate?.(20);
+  const b = $('btn-shutter');
+  b.classList.remove('pressed');
+  void b.offsetWidth;
+  b.classList.add('pressed');
+}
+
+/** 拍下的瞬間就把縮圖換成這張（美化完成後再換成美化版） */
+function showQuickThumb(canvas) {
+  const t = document.createElement('canvas');
+  t.width = 96;
+  t.height = Math.round(96 * canvas.height / canvas.width);
+  t.getContext('2d').drawImage(canvas, 0, 0, t.width, t.height);
+  const img = $('last-thumb');
+  if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+  img.src = t.toDataURL('image/jpeg', 0.7);
+  const btn = $('btn-gallery');
+  btn.classList.remove('pop');
+  void btn.offsetWidth;
+  btn.classList.add('pop');
+}
+
+/* 背景處理佇列 */
+const queue = [];
+let processing = false;
+const idle = () => new Promise((r) => (window.requestIdleCallback ? requestIdleCallback(() => r(), { timeout: 400 }) : setTimeout(r, 30)));
+
+function updateQueueBadge() {
+  const n = queue.reduce((sum, job) => sum + job.length, 0) + (processing ? 1 : 0);
+  $('queue-badge').textContent = n ? `美化中 ${n}` : '';
+  $('queue-badge').classList.toggle('hidden', !n);
+}
+
+let lastShot = 0;
+function enqueue(frames) {
+  queue.push(frames);
+  lastShot = performance.now();
+  updateQueueBadge();
+  if (!processing) runQueue();
+}
+
+/** 等到停止拍照 1.2 秒再開始 AI 分析，連續拍照時完全不受影響 */
+async function waitForPause() {
+  while (performance.now() - lastShot < 1200 || state.capturing) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+async function runQueue() {
+  processing = true;
+  while (queue.length) {
+    const frames = queue.shift();
+    const saved = [];
+    try {
+      while (frames.length) {
+        updateQueueBadge();
+        await waitForPause();
+        saved.push(await savePhoto(frames.shift()));
+      }
+      if (saved.length > 1) await markBestShot(saved);
+      await refreshThumb();
+      if (!$('gallery-view').classList.contains('hidden')) renderGallery();
+    } catch (err) {
+      console.warn('照片處理失敗', err);
+    }
+  }
+  processing = false;
+  updateQueueBadge();
 }
 
 function currentCrop() {
@@ -262,36 +336,69 @@ function capture() {
   }
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
-  let anchors = null;
-  if (poseDetector) {
-    try {
-      const ts = Math.max(performance.now(), lastPoseTs + 1);
-      lastPoseTs = ts;
-      const lm = poseDetector.detectForVideo(video, ts).landmarks?.[0];
-      if (lm) {
-        let mapped = Hints.mapPose(lm, video.videoWidth, video.videoHeight, crop);
-        if (state.facingMode === 'user') mapped = mapped.map((q) => ({ ...q, x: 1 - q.x })); // 照片是鏡像的
-        anchors = Retouch.poseAnchors(mapped);
-      }
-    } catch (err) { console.warn(err); }
-  }
-  return { canvas, anchors, level: state.lastLevel || 'tip' };
+  // 快門這一步只擷取畫面，人物位置等分析留到背景處理
+  return { canvas, level: state.lastLevel || 'tip' };
+}
+
+/**
+ * 在縮小的畫面上偵測人物骨架（模型本身只需要 256px，送整張 4K 畫面反而很慢）。
+ * 回傳的座標相對於 source 中 (sx, sy, sw, sh) 這塊區域。
+ */
+const poseCanvas = document.createElement('canvas');
+const poseCtx = poseCanvas.getContext('2d');
+function detectPose(source, sx, sy, sw, sh) {
+  if (!poseDetector || !sw || !sh) return null;
+  const k = 256 / Math.max(sw, sh);
+  const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
+  if (poseCanvas.width !== w || poseCanvas.height !== h) { poseCanvas.width = w; poseCanvas.height = h; }
+  poseCtx.drawImage(source, sx, sy, sw, sh, 0, 0, w, h);
+  const ts = Math.max(performance.now(), lastPoseTs + 1);
+  lastPoseTs = ts;
+  return poseDetector.detectForVideo(poseCanvas, ts).landmarks?.[0] ?? null;
 }
 
 const toJpeg = (canvas) => new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
 
+/* 美化繪製交給背景執行緒；不支援時才在主畫面處理 */
+let renderWorker = null;
+try {
+  if (typeof OffscreenCanvas !== 'undefined' && window.Worker) renderWorker = new Worker('render-worker.js');
+} catch (err) { console.warn('背景執行緒無法啟動，改在主畫面處理', err); }
+const pendingRenders = new Map();
+let renderSeq = 0;
+renderWorker?.addEventListener('message', (e) => {
+  const job = pendingRenders.get(e.data.id);
+  if (!job) return;
+  pendingRenders.delete(e.data.id);
+  if (e.data.error) job.reject(new Error(e.data.error)); else job.resolve(e.data.blob);
+});
+
+/** 依分析結果與美化程度產生美化後的 JPEG */
+async function renderBeauty(source, info, params) {
+  if (renderWorker) {
+    const bitmap = await createImageBitmap(source);
+    const id = ++renderSeq;
+    return new Promise((resolve, reject) => {
+      pendingRenders.set(id, { resolve, reject });
+      renderWorker.postMessage({ id, bitmap, info, params }, [bitmap]);
+    });
+  }
+  const bitmap = source instanceof Blob ? await createImageBitmap(source) : source;
+  return toJpeg(Beauty.render(bitmap, bitmap.width, bitmap.height, info, params));
+}
+
 /** 存原圖＋自動美化後的照片；APK 版同時存到手機相簿 */
-async function savePhoto({ canvas, anchors, level }, extra = {}) {
+async function savePhoto({ canvas, level }, extra = {}) {
   const original = await toJpeg(canvas);
   const photo = { blob: original, createdAt: Date.now(), ...extra };
-  // 分析一次（臉、人物分割、清晰度），之後調整美化不必重跑模型
-  const info = { anchors, level, ...Beauty.analyze(canvas, beautyModels) };
+  // 分析一次（臉、人物分割、清晰度），之後調整美化不必重跑模型；每一步之間讓出時間給相機畫面
+  const info = { level, ...(await analyzePhoto(canvas)) };
   photo.info = info;
   if (settings.beauty.on) {
     const beauty = { ...settings.beauty };
     delete beauty.on;
     try {
-      photo.blob = await toJpeg(Beauty.render(canvas, canvas.width, canvas.height, info, beauty));
+      photo.blob = await renderBeauty(canvas, info, beauty);
       photo.original = original;
       photo.beauty = beauty;
     } catch (err) { console.warn('美化失敗，保留原圖', err); }
@@ -544,10 +651,7 @@ let beautyTimer;
 async function applyBeauty(key, value) {
   const photo = current;
   const beauty = { ...photoBeauty(photo), [key]: value };
-  const bitmap = await createImageBitmap(photo.original);
-  const out = Beauty.render(bitmap, bitmap.width, bitmap.height, photoInfo(photo), beauty);
-  bitmap.close?.();
-  photo.blob = await toJpeg(out);
+  photo.blob = await renderBeauty(photo.original, photoInfo(photo), beauty);
   photo.beauty = beauty;
   await db.put(photo);
   // 記住偏好，下次拍照沿用
@@ -637,7 +741,8 @@ async function loadPoseDetector() {
     });
     poseDetector = await create('GPU').catch(() => create('CPU'));
     poseStatus = 'ready';
-    loadBeautyModels(vision, fileset).catch((err) => console.warn('美化模型載入失敗', err));
+    // 分析改在背景執行緒；背景執行緒不能用時才在主畫面載入美化模型
+    analysisReady.catch(() => loadBeautyModels(vision, fileset).catch((err) => console.warn('美化模型載入失敗', err)));
   } catch (err) {
     console.warn('人物偵測載入失敗，只使用亮度與角度提示', err);
     poseStatus = 'failed';
@@ -648,6 +753,51 @@ async function loadPoseDetector() {
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
 const beautyModels = {};
+
+/* 拍照後的 AI 分析交給背景執行緒（analyze-worker.js） */
+let analysisWorker = null;
+const pendingAnalysis = new Map();
+let analysisSeq = 0;
+const analysisReady = new Promise((resolve, reject) => {
+  try {
+    analysisWorker = new Worker('analyze-worker.js');
+  } catch (err) { reject(err); return; }
+  analysisWorker.addEventListener('message', (e) => {
+    const m = e.data;
+    if (m.type === 'ready') resolve();
+    else if (m.type === 'failed') reject(new Error(m.error));
+    else if (m.type === 'result') {
+      const job = pendingAnalysis.get(m.id);
+      pendingAnalysis.delete(m.id);
+      if (m.error) job?.reject(new Error(m.error)); else job?.resolve(m.info);
+    }
+  });
+  analysisWorker.addEventListener('error', (e) => reject(e.error || new Error(e.message || '背景分析無法啟動')));
+});
+analysisReady.catch((err) => { console.warn('背景分析無法使用，改在主畫面分析', err); analysisWorker = null; });
+
+/** 分析一張照片：優先用背景執行緒，不行才在主畫面做（會比較卡） */
+async function analyzePhoto(canvas) {
+  if (analysisWorker) {
+    try {
+      await analysisReady;
+      const bitmap = await createImageBitmap(canvas);
+      const id = ++analysisSeq;
+      return await new Promise((resolve, reject) => {
+        pendingAnalysis.set(id, { resolve, reject });
+        analysisWorker.postMessage({ id, bitmap }, [bitmap]);
+      });
+    } catch (err) { console.warn('背景分析失敗，改在主畫面分析', err); }
+  }
+  await waitForPause();
+  let anchors = null;
+  try { anchors = Retouch.poseAnchors(detectPose(canvas, 0, 0, canvas.width, canvas.height)); } catch (err) { console.warn(err); }
+  await waitForPause();
+  const faceInfo = Beauty.analyze(canvas, { face: beautyModels.face });
+  await waitForPause();
+  const segInfo = Beauty.analyze(canvas, { segmenter: beautyModels.segmenter }, { sharpness: false });
+  return { anchors, ...faceInfo, mask: segInfo.mask };
+}
 
 async function loadBeautyModels({ FaceLandmarker, ImageSegmenter }, fileset) {
   const opts = (path, delegate) => ({ baseOptions: { modelAssetPath: path, delegate }, runningMode: 'IMAGE' });
@@ -693,6 +843,7 @@ function readMotion() {
 }
 
 const stability = new Guide.Stability({ holdMs: 1200 });
+let lastLivePose = null;
 let lastAutoShot = 0;
 
 function clearGuide() {
@@ -715,13 +866,9 @@ function updateHint() {
   lightCtx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, lightCanvas.width, lightCanvas.height);
   const light = Hints.measureLight(lightCtx, lightCanvas.width, lightCanvas.height);
 
-  let pose = null;
-  if (poseDetector) {
-    const ts = Math.max(performance.now(), lastPoseTs + 1);
-    lastPoseTs = ts;
-    const lm = poseDetector.detectForVideo(video, ts).landmarks?.[0];
-    pose = lm ? Hints.mapPose(lm, video.videoWidth, video.videoHeight, crop) : null;
-  }
+  // 拍照瞬間與背景分析期間暫停偵測，讓快門優先
+  const pose = state.capturing ? lastLivePose : detectPose(video, crop.sx, crop.sy, crop.sw, crop.sh);
+  lastLivePose = pose;
 
   const motion = readMotion();
   let hint = Hints.analyze({ light, motion, pose });
@@ -744,7 +891,7 @@ function updateHint() {
   // 自動快門：構圖 OK 且她站穩 1.2 秒就自動拍，拍完休息 4 秒
   if (state.auto) {
     const now = performance.now();
-    const ready = hint.level === 'ok' && !state.busy && now - lastAutoShot > 4000;
+    const ready = hint.level === 'ok' && !state.capturing && now - lastAutoShot > 4000;
     const progress = stability.update(ready, pose, now);
     setAutoProgress(progress);
     if (progress >= 1) {
@@ -851,7 +998,9 @@ try {
     delete saved.beautify;
     delete saved.legs;
   }
-  Object.assign(settings, saved);
+  // v2：預設美化程度調低，舊的偏好重設一次
+  if ((saved.version || 1) < 2) saved.beauty = { on: saved.beauty?.on ?? true };
+  Object.assign(settings, saved, { version: 2 });
   settings.beauty = { on: true, ...Beauty.DEFAULTS, ...settings.beauty };
 } catch { /* 無法使用瀏覽器儲存 */ }
 
@@ -1014,9 +1163,13 @@ navigator.storage?.persist?.().catch(() => {}); // 請瀏覽器不要自動清�
 startCamera();
 refreshThumb();
 loadPoseDetector();
-setInterval(() => {
+// 依手機速度調整偵測頻率：偵測花的時間越久，間隔拉越長，畫面才不會卡
+(function hintLoop() {
+  const t0 = performance.now();
   try { updateHint(); } catch (err) { console.warn(err); }
-}, 300);
+  const cost = performance.now() - t0;
+  setTimeout(hintLoop, Math.min(1500, Math.max(250, cost * 3))); // 最多 1.5 秒更新一次
+})();
 // APK 內的檔案本來就在手機上，不需要 Service Worker 快取
 if ('serviceWorker' in navigator && !isNative) {
   navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -170,3 +170,12 @@ dialog::backdrop { background: rgba(0,0,0,.9); }
 .beauty-tabs button:disabled { opacity: .35; }
 .toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 14px; border-radius: 999px; background: rgba(20,20,20,.85); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 2; }
 .viewer-best { color: #ffcc00; }
+
+/* 快門與縮圖的即時回饋 */
+.shutter.pressed { animation: shutter-press .25s ease-out; }
+@keyframes shutter-press { 0% { transform: scale(.82); box-shadow: 0 0 0 4px #111, 0 0 0 7px #ffcc00; } 100% { transform: scale(1); } }
+.thumb-wrap { position: relative; display: inline-block; }
+.thumb.pop { animation: thumb-pop .3s ease-out; }
+@keyframes thumb-pop { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
+.queue-badge { position: absolute; left: 50%; top: -22px; transform: translateX(-50%); white-space: nowrap; font-size: 11px; font-weight: 700; color: #111; background: #ffcc00; border-radius: 999px; padding: 1px 7px; }
+@media (prefers-reduced-motion: reduce) { .shutter.pressed, .thumb.pop { animation: none; } }

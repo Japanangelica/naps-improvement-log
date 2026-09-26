@@ -1,5 +1,5 @@
-const CACHE = 'photo-app-v5';
-const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'hints.js', 'retouch.js', 'beauty.js', 'guide.js', 'manifest.json', 'icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'];
+const CACHE = 'photo-app-v7';
+const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'hints.js', 'retouch.js', 'beauty.js', 'render-worker.js', 'analyze-worker.js', 'guide.js', 'manifest.json', 'icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));

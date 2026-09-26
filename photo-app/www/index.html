@@ -55,7 +55,10 @@
     </nav>
 
     <div class="controls">
-      <button id="btn-gallery" class="thumb" aria-label="相簿" title="相簿"><img id="last-thumb" alt=""></button>
+      <span class="thumb-wrap">
+        <button id="btn-gallery" class="thumb" aria-label="相簿" title="相簿"><img id="last-thumb" alt=""></button>
+        <span id="queue-badge" class="queue-badge hidden" aria-live="polite"></span>
+      </span>
       <button id="btn-shutter" class="shutter" aria-label="拍照" title="拍照"><svg class="auto-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37"></circle></svg></button>
       <button id="btn-switch" class="round" aria-label="切換前後鏡頭" title="切換前後鏡頭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg></button>
     </div>

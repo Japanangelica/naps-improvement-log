@@ -9,6 +9,15 @@ const RAMP_UP = 0.25;     // 腰部往下 25% 內，拉伸量由 0 漸增，避�
 const RAMP_DOWN = 0.15;   // 接近腳踝的 15% 內漸減回 0，鞋子和腳掌不會被拉長
 const MIN_HEADROOM = 0.04; // 裁掉頭頂留白時，至少保留畫面高度 4%
 
+/** 建立畫布：主畫面用 <canvas>，背景執行緒（Worker）用 OffscreenCanvas */
+function makeCanvas(w, h) {
+  if (typeof document === 'undefined') return new OffscreenCanvas(w, h);
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c;
+}
+
 function smoothstep(t) {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
@@ -85,9 +94,7 @@ function enhanceFilter(meanLuma) {
 }
 
 function meanLuma(src, W, H) {
-  const c = document.createElement('canvas');
-  c.width = 32;
-  c.height = Math.max(1, Math.round(32 * H / W));
+  const c = makeCanvas(32, Math.max(1, Math.round(32 * H / W)));
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(src, 0, 0, c.width, c.height);
   const { data } = ctx.getImageData(0, 0, c.width, c.height);
@@ -108,9 +115,7 @@ function render(src, W, H, { anchors, legs = 0, enhance = true } = {}) {
     // 第 1 步：只做形狀（長腿），不套濾鏡；逐列繪製很快
     const { hip, lower, span, cropTop } = plan;
     outH = plan.outH;
-    shaped = document.createElement('canvas');
-    shaped.width = W;
-    shaped.height = outH;
+    shaped = makeCanvas(W, outH);
     const g = shaped.getContext('2d');
     g.drawImage(src, 0, cropTop, W, hip - cropTop, 0, 0, W, hip - cropTop);
     let y = hip - cropTop;
@@ -121,9 +126,7 @@ function render(src, W, H, { anchors, legs = 0, enhance = true } = {}) {
     }
   }
   // 第 2 步：整張一次套上美化濾鏡（濾鏡只算一次）
-  const out = document.createElement('canvas');
-  out.width = W;
-  out.height = outH;
+  const out = makeCanvas(W, outH);
   const ctx = out.getContext('2d');
   ctx.filter = enhance ? enhanceFilter(meanLuma(src, W, H)) : 'none';
   ctx.drawImage(shaped, 0, 0);
@@ -132,4 +135,4 @@ function render(src, W, H, { anchors, legs = 0, enhance = true } = {}) {
 
 const Retouch = { poseAnchors, rowScale, legPlan, enhanceFilter, render };
 if (typeof module !== 'undefined') module.exports = Retouch;
-else self.Retouch = Retouch;
+else Object.assign(self, { Retouch, makeCanvas });
