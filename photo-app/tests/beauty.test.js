@@ -69,7 +69,8 @@ test('沒有臉時依清晰度與構圖選', () => {
 
 test('依分析結果判斷可用的美化', () => {
   assert.deepStrictEqual(B.available({}), { frame: false, legs: false, waist: false, face: false, skin: false, blur: false });
-  const av = B.available({ anchors: { shoulderY: 0.3 }, framing: {}, face: new Float32Array(2), mask: {} });
+  const mask = { w: 10, h: 10, data: new Uint8Array(100).map((_, i) => (i < 30 ? 3 : 0)) }; // 人占 30%
+  const av = B.available({ anchors: { shoulderY: 0.3 }, framing: {}, face: new Float32Array(2), mask });
   assert.ok(Object.values(av).every(Boolean));
 });
 
@@ -136,4 +137,14 @@ test('構圖修正不會切到張開的手臂', () => {
   }
   const narrow = B.compositionCrop({ ...f, minX: 0.35, maxX: 0.65 }, 3000, 4000, 1);
   assert.ok(narrow && narrow.h < 4000 * 0.9); // 手沒張開時照常裁
+});
+
+test('沒有骨架或臉互相印證、或人太小時，不做背景虛化與美肌', () => {
+  const mk = (frac) => ({ w: 100, h: 100, data: new Uint8Array(10000).map((_, i) => (i < frac * 10000 ? 2 : 0)) });
+  assert.strictEqual(B.maskTrusted({ mask: mk(0.3) }), false);                         // 沒偵測到人
+  assert.strictEqual(B.maskTrusted({ mask: mk(0.017), framing: {} }), false);          // 人太小（像背對的遠景）
+  assert.strictEqual(B.maskTrusted({ mask: mk(0.9), framing: {} }), false);            // 幾乎整張都是人，不合理
+  assert.strictEqual(B.maskTrusted({ mask: mk(0.2), framing: {} }), true);
+  assert.strictEqual(B.available({ mask: mk(0.2), framing: {} }).skin, false);         // 美肌需要臉
+  assert.strictEqual(B.DEFAULTS.blur, 0);                                              // 背景虛化預設關閉
 });

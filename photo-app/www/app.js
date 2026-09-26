@@ -600,8 +600,8 @@ const BEAUTY_WHY = {
   legs: '這張沒拍到完整的腰和腳',
   waist: '這張沒拍到完整的肩膀和腰',
   face: '這張沒偵測到臉',
-  skin: '這張沒有人物分割資料',
-  blur: '這張沒有人物分割資料',
+  skin: '這張沒有清楚偵測到臉和人物範圍',
+  blur: '這張沒有清楚偵測到人物範圍（背對、太遠或太暗時常發生）',
 };
 let beautyKey = 'frame';
 
@@ -635,7 +635,10 @@ function selectBeauty(key) {
   $('beauty-slider').value = val;
   $('beauty-slider').disabled = !av[key];
   $('beauty-value').textContent = key === 'legs' ? `+${val}%` : String(val);
-  const note = current.best ? `👑 連拍推薦：${current.best}　` : '';
+  const info = photoInfo(current);
+  const nobody = current.info && !info.framing && !info.face;
+  const note = (current.best ? `👑 連拍推薦：${current.best}　` : '') +
+    (nobody ? '這張沒偵測到人物（可能背對、太遠或太暗），只做了調亮。' : '');
   $('retouch-note').textContent = note + (av[key] ? '按住照片可看原圖' : `${BEAUTY_WHY[key]}，所以無法調整${BEAUTY_LABEL[key]}`);
 }
 
@@ -1005,7 +1008,8 @@ try {
   }
   // v2：預設美化程度調低，舊的偏好重設一次
   if ((saved.version || 1) < 2) saved.beauty = { on: saved.beauty?.on ?? true };
-  Object.assign(settings, saved, { version: 2 });
+  if ((saved.version || 1) < 3 && saved.beauty) saved.beauty.blur = 0; // v3：背景虛化改成預設關閉
+  Object.assign(settings, saved, { version: 3 });
   settings.beauty = { on: true, ...Beauty.DEFAULTS, ...settings.beauty };
 } catch { /* 無法使用瀏覽器儲存 */ }
 

@@ -22,7 +22,8 @@ const FEATURES = {
 const NOSE_TIP = 1, CHIN = 152, CHEEK_L = 234, CHEEK_R = 454;
 
 /** 預設美化程度（0–100；長腿為 0–15 的百分比） */
-const DEFAULTS = { frame: 80, legs: 6, face: 25, waist: 15, skin: 30, blur: 20 };
+// 背景虛化預設關閉：AI 沒抓準人物時會讓整張變糊，由使用者自己決定要不要開
+const DEFAULTS = { frame: 80, legs: 6, face: 25, waist: 15, skin: 30, blur: 0 };
 
 /* ---------- 構圖修正：自動裁掉太多的地板、天空 ---------- */
 
@@ -372,8 +373,9 @@ function blurBackground(base, W, H, info, strength) {
 function render(src, W, H, info = {}, p = DEFAULTS, { enhance = true } = {}) {
   let img = src;
   const pct = (v) => Math.max(0, Math.min(100, v || 0)) / 100;
-  if (info.mask && pct(p.blur) > 0) img = blurBackground(img, W, H, info, pct(p.blur));
-  if (info.mask && pct(p.skin) > 0) img = smoothSkin(img, W, H, info, pct(p.skin));
+  const av = available(info);
+  if (av.blur && pct(p.blur) > 0) img = blurBackground(img, W, H, info, pct(p.blur));
+  if (av.skin && pct(p.skin) > 0) img = smoothSkin(img, W, H, info, pct(p.skin));
   const fb = faceBand(info.face, W, H);
   if (fb && pct(p.face) > 0) img = warpBand(img, W, H, fb, pct(p.face));
   const wb = waistBand(info.anchors, W, H);
@@ -395,20 +397,39 @@ function render(src, W, H, info = {}, p = DEFAULTS, { enhance = true } = {}) {
   return cropped;
 }
 
+/** 人物分割中「人」占畫面的比例 */
+function personFraction(mask) {
+  if (!mask) return 0;
+  let n = 0;
+  for (let i = 0; i < mask.data.length; i++) if (mask.data[i] !== CAT.BACKGROUND) n++;
+  return n / mask.data.length;
+}
+
+/**
+ * 分割結果可不可信：要有骨架或臉互相印證，而且人占畫面 3%～75%。
+ * （背對鏡頭、太遠、太暗時 AI 常抓不準，這時不做背景虛化和美肌，避免把照片弄糊）
+ */
+function maskTrusted(info = {}) {
+  if (!info.mask || !(info.framing || info.face)) return false;
+  const f = personFraction(info.mask);
+  return f >= 0.03 && f <= 0.75;
+}
+
 /** 這張照片可以用哪些美化（沒偵測到臉就不能小臉，以此類推） */
 function available(info = {}) {
+  const trusted = maskTrusted(info);
   return {
     frame: !!info.framing,
     legs: !!info.anchors,
     waist: !!(info.anchors && info.anchors.shoulderY != null),
     face: !!info.face,
-    skin: !!info.mask,
-    blur: !!info.mask,
+    skin: trusted && !!info.face,
+    blur: trusted,
   };
 }
 
 const Beauty = {
-  CAT, DEFAULTS, compositionCrop, bump, remapRow, shrinkMask, bandScale, faceBand, waistBand,
+  CAT, DEFAULTS, compositionCrop, personFraction, maskTrusted, bump, remapRow, shrinkMask, bandScale, faceBand, waistBand,
   sharpness, scoreShot, pickBest, bestReason, analyze, render, available,
 };
 if (typeof module !== 'undefined') module.exports = Beauty;
