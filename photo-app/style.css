@@ -7,7 +7,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 /* Camera */
 .viewfinder { position: relative; flex: 1; overflow: hidden; background: #000; }
-#video { width: 100%; height: 100%; object-fit: cover; }
+/* contain：預覽範圍 = 實際拍到的範圍（跟三星相機一樣 4:3 預覽） */
+#video { width: 100%; height: 100%; object-fit: contain; touch-action: none; }
 #video.mirror { transform: scaleX(-1); }
 .grid { position: absolute; inset: 0; pointer-events: none;
   background:
@@ -16,14 +17,23 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .countdown { position: absolute; inset: 0; display: grid; place-items: center; font-size: 30vmin; font-weight: 700; text-shadow: 0 4px 20px rgba(0,0,0,.6); }
 .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
 .flash.on { opacity: .9; transition: none; }
-.hint { position: absolute; left: 16px; right: 16px; bottom: 16px; padding: 10px 14px; border-radius: 12px; font-size: 15px; line-height: 1.5; background: rgba(0,0,0,.6); backdrop-filter: blur(6px); border-left: 4px solid #999; transition: background .2s; }
+.hint { position: absolute; left: 16px; right: 16px; bottom: 64px; padding: 10px 14px; border-radius: 12px; font-size: 15px; line-height: 1.5; background: rgba(0,0,0,.6); backdrop-filter: blur(6px); border-left: 4px solid #999; transition: background .2s; }
 .hint.warn { border-left-color: #ff6b4a; }
 .hint.tip { border-left-color: #ffcc00; }
 .hint.ok { border-left-color: #3ecf6e; }
+.lens-bar { position: absolute; left: 0; right: 0; bottom: 14px; display: flex; justify-content: center; gap: 8px; }
+.zoom-levels { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(50,50,50,.75); }
+.zoom-levels:empty { display: none; }
+.zoom-levels button, #btn-lens { min-width: 36px; height: 36px; padding: 0 10px; border-radius: 999px; font-size: 13px; }
+.zoom-levels button.active { background: #fff; color: #111; font-weight: 700; }
+#btn-lens { background: rgba(50,50,50,.75); }
+.focus-ring { position: absolute; width: 72px; height: 72px; margin: -36px 0 0 -36px; border: 2px solid #ffcc00; border-radius: 50%; opacity: 0; pointer-events: none; }
+.focus-ring.show { animation: focus .9s ease-out; }
+@keyframes focus { 0% { opacity: 1; transform: scale(1.4); } 30% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
 .error { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; line-height: 1.6; }
 
-.toolbar.top { position: absolute; top: env(safe-area-inset-top, 0); left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding: 12px 16px; }
-.toolbar button { background: rgba(0,0,0,.45); padding: 6px 12px; border-radius: 999px; font-size: 14px; }
+.toolbar.top { position: absolute; top: env(safe-area-inset-top, 0); left: 0; right: 0; display: flex; gap: 6px; padding: 12px 16px; overflow-x: auto; scrollbar-width: none; }
+.toolbar button { flex: none; background: rgba(50,50,50,.75); padding: 6px 10px; border-radius: 999px; font-size: 14px; white-space: nowrap; }
 .toolbar button.on { background: #ffcc00; color: #111; }
 
 .filters { display: flex; gap: 8px; overflow-x: auto; padding: 10px 16px; background: #111; scrollbar-width: none; }

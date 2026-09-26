@@ -11,6 +11,13 @@ const state = {
   hints: true,
   stream: null,
   busy: false,
+  track: null,
+  caps: {},          // 目前鏡頭支援的功能（變焦、補光燈、對焦…）
+  backCams: [],      // 三星等多鏡頭手機的後鏡頭清單（超廣角、主鏡頭、望遠）
+  backIndex: 0,
+  zoom: 1,
+  torch: false,
+  wakeLock: null,
 };
 
 /* ---------- IndexedDB 照片儲存 ---------- */
@@ -47,13 +54,26 @@ async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
     return showError('此瀏覽器不支援相機。請使用 HTTPS 網址開啟，並使用最新版 Chrome / Safari。');
   }
+  const back = state.facingMode === 'environment' && state.backCams[state.backIndex];
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: state.facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: {
+        ...(back ? { deviceId: { exact: back.deviceId } } : { facingMode: state.facingMode }),
+        // 三星相機預設 4:3，要求較高解析度，實際會取最接近的支援規格
+        width: { ideal: 2560 },
+        height: { ideal: 1920 },
+      },
       audio: false,
     });
     video.srcObject = state.stream;
     video.classList.toggle('mirror', state.facingMode === 'user');
+    state.track = state.stream.getVideoTracks()[0];
+    state.caps = state.track.getCapabilities?.() ?? {};
+    state.zoom = 1;
+    state.torch = false;
+    await listBackCameras();
+    updateCameraControls();
+    requestWakeLock();
   } catch (err) {
     showError(err.name === 'NotAllowedError'
       ? '無法使用相機：請在瀏覽器設定中允許相機權限後重新整理。'
@@ -64,6 +84,93 @@ async function startCamera() {
 function stopCamera() {
   state.stream?.getTracks().forEach((t) => t.stop());
   state.stream = null;
+  state.track = null;
+  state.wakeLock?.release().catch(() => {});
+  state.wakeLock = null;
+}
+
+/* ---------- 三星（Android）鏡頭控制 ---------- */
+async function listBackCameras() {
+  if (state.backCams.length || state.facingMode !== 'environment') return;
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+  // Android Chrome 的標籤類似「camera2 0, facing back」
+  state.backCams = devices.filter((d) => d.kind === 'videoinput' && /back|rear|environment|後/i.test(d.label));
+  const current = state.track.getSettings().deviceId;
+  state.backIndex = Math.max(0, state.backCams.findIndex((d) => d.deviceId === current));
+}
+
+function applyAdvanced(constraints) {
+  return state.track?.applyConstraints({ advanced: [constraints] }).catch((err) => console.warn(err));
+}
+
+function updateCameraControls() {
+  const { zoom, torch } = state.caps;
+  $('btn-torch').classList.toggle('hidden', !torch);
+  $('btn-torch').classList.remove('on');
+
+  const lensBtn = $('btn-lens');
+  const multiLens = state.facingMode === 'environment' && state.backCams.length > 1;
+  lensBtn.classList.toggle('hidden', !multiLens);
+  lensBtn.textContent = `鏡頭 ${state.backIndex + 1}/${state.backCams.length}`;
+
+  const levels = zoom ? [zoom.min, 1, 2, 4].filter((z, i, a) => z >= zoom.min && z <= zoom.max && a.indexOf(z) === i) : [];
+  const box = $('zoom-levels');
+  box.innerHTML = '';
+  if (levels.length > 1) {
+    for (const z of levels) {
+      const b = document.createElement('button');
+      b.dataset.zoom = z;
+      b.textContent = `${Number(z.toFixed(1))}x`;
+      b.onclick = () => setZoom(z);
+      box.appendChild(b);
+    }
+  }
+  $('lens-bar').classList.toggle('hidden', !multiLens && levels.length < 2);
+  markZoom();
+}
+
+function setZoom(z) {
+  const { zoom } = state.caps;
+  if (!zoom) return;
+  state.zoom = Math.min(zoom.max, Math.max(zoom.min, z));
+  applyAdvanced({ zoom: state.zoom });
+  markZoom();
+}
+
+function markZoom() {
+  document.querySelectorAll('#zoom-levels button').forEach((b) => {
+    b.classList.toggle('active', Math.abs(Number(b.dataset.zoom) - state.zoom) < 0.05);
+  });
+}
+
+async function requestWakeLock() {
+  // 拍照時螢幕不自動變暗、鎖定
+  try { state.wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* 省電模式等情況 */ }
+}
+
+/** 點畫面對焦：把點擊位置換算成影像座標（0–1） */
+function focusAt(clientX, clientY) {
+  const { focusMode = [], pointsOfInterest } = state.caps;
+  if (!state.track || (!focusMode.length && !pointsOfInterest)) return;
+  const r = video.getBoundingClientRect();
+  const scale = Math.min(r.width / video.videoWidth, r.height / video.videoHeight);
+  const w = video.videoWidth * scale, h = video.videoHeight * scale;
+  let x = (clientX - r.left - (r.width - w) / 2) / w;
+  const y = (clientY - r.top - (r.height - h) / 2) / h;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+  if (state.facingMode === 'user') x = 1 - x;
+
+  const c = { pointsOfInterest: [{ x, y }] };
+  if (focusMode.includes('single-shot')) c.focusMode = 'single-shot';
+  else if (focusMode.includes('continuous')) c.focusMode = 'continuous';
+  applyAdvanced(c);
+
+  const ring = $('focus-ring');
+  ring.style.left = `${clientX - $('viewfinder').getBoundingClientRect().left}px`;
+  ring.style.top = `${clientY - $('viewfinder').getBoundingClientRect().top}px`;
+  ring.classList.remove('show');
+  void ring.offsetWidth;
+  ring.classList.add('show');
 }
 
 function showError(msg) {
@@ -112,6 +219,7 @@ function capture() {
 }
 
 function flash() {
+  navigator.vibrate?.(30);
   const f = $('flash');
   f.classList.add('on');
   requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
@@ -249,6 +357,9 @@ function updateHint() {
   }
 
   let hint = Hints.analyze({ light, motion: readMotion(), pose });
+  if (hint.text.startsWith('太暗') && state.caps.torch && !state.torch) {
+    hint = { ...hint, text: `${hint.text}，或打開上方 🔦 補光燈` };
+  }
   if (!pose && hint.level === 'tip' && poseStatus === 'loading') {
     hint = { level: 'tip', text: '人物偵測載入中…' };
   }
@@ -258,6 +369,36 @@ function updateHint() {
 
 /* ---------- 事件 ---------- */
 $('btn-shutter').onclick = takePhoto;
+$('btn-torch').onclick = (e) => {
+  state.torch = !state.torch;
+  applyAdvanced({ torch: state.torch });
+  e.currentTarget.classList.toggle('on', state.torch);
+};
+$('btn-lens').onclick = () => {
+  state.backIndex = (state.backIndex + 1) % state.backCams.length;
+  startCamera();
+};
+$('viewfinder').addEventListener('click', (e) => {
+  if (e.target === video) focusAt(e.clientX, e.clientY);
+});
+
+// 雙指縮放
+let pinch = null;
+$('viewfinder').addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2 && state.caps.zoom) {
+    const [a, b] = e.touches;
+    pinch = { dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), zoom: state.zoom };
+  }
+}, { passive: true });
+$('viewfinder').addEventListener('touchmove', (e) => {
+  if (!pinch || e.touches.length !== 2) return;
+  e.preventDefault();
+  const [a, b] = e.touches;
+  const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  setZoom(pinch.zoom * dist / pinch.dist);
+}, { passive: false });
+$('viewfinder').addEventListener('touchend', () => { pinch = null; });
+
 $('btn-switch').onclick = () => {
   state.facingMode = state.facingMode === 'user' ? 'environment' : 'user';
   startCamera();

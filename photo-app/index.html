@@ -7,16 +7,22 @@
   <title>拍照 App</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main id="camera-view" class="view">
-    <div class="viewfinder">
+    <div class="viewfinder" id="viewfinder">
       <video id="video" autoplay playsinline muted></video>
       <div id="grid" class="grid hidden"></div>
       <div id="countdown" class="countdown hidden"></div>
       <div id="flash" class="flash"></div>
+      <div id="focus-ring" class="focus-ring"></div>
       <div id="hint" class="hint tip">💡 準備中…</div>
+      <div id="lens-bar" class="lens-bar hidden">
+        <div id="zoom-levels" class="zoom-levels"></div>
+        <button id="btn-lens" class="hidden">鏡頭</button>
+      </div>
       <p id="error" class="error hidden"></p>
     </div>
 
@@ -31,6 +37,7 @@
 
     <div class="toolbar top">
       <button id="btn-hints" class="on" title="構圖提示">💡 提示</button>
+      <button id="btn-torch" class="hidden" title="補光燈">🔦</button>
       <button id="btn-burst" title="連拍">連拍 <span id="burst-label">關</span></button>
       <button id="btn-timer" title="倒數計時">⏱ <span id="timer-label">關</span></button>
       <button id="btn-grid" title="格線">＃</button>
