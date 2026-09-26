@@ -19,7 +19,6 @@ const state = {
   torch: false,
   wakeLock: null,
   auto: false,       // 自動快門
-  legs: 0.08,        // 自動長腿的預設加長比例
   ratio: null,       // 畫面比例（寬/高）：null = 原始
   settings: {},      // 目前鏡頭的實際解析度等設定
 };
@@ -224,7 +223,10 @@ async function takePhoto() {
       flash();
     }
     // 拍完再依序美化存檔，連拍時不會因為美化而拖慢拍攝間隔
-    for (const f of frames) await savePhoto(f);
+    if (frames.length > 1) showToast('美化中，並從連拍挑出最佳一張…');
+    const saved = [];
+    for (const f of frames) saved.push(await savePhoto(f));
+    if (saved.length > 1) await markBestShot(saved);
     await refreshThumb();
   } finally {
     state.busy = false;
@@ -266,30 +268,60 @@ function capture() {
       const ts = Math.max(performance.now(), lastPoseTs + 1);
       lastPoseTs = ts;
       const lm = poseDetector.detectForVideo(video, ts).landmarks?.[0];
-      if (lm) anchors = Retouch.poseAnchors(Hints.mapPose(lm, video.videoWidth, video.videoHeight, crop));
+      if (lm) {
+        let mapped = Hints.mapPose(lm, video.videoWidth, video.videoHeight, crop);
+        if (state.facingMode === 'user') mapped = mapped.map((q) => ({ ...q, x: 1 - q.x })); // 照片是鏡像的
+        anchors = Retouch.poseAnchors(mapped);
+      }
     } catch (err) { console.warn(err); }
   }
-  return { canvas, anchors };
+  return { canvas, anchors, level: state.lastLevel || 'tip' };
 }
 
 const toJpeg = (canvas) => new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
 
 /** 存原圖＋自動美化後的照片；APK 版同時存到手機相簿 */
-async function savePhoto({ canvas, anchors }) {
+async function savePhoto({ canvas, anchors, level }, extra = {}) {
   const original = await toJpeg(canvas);
-  const photo = { blob: original, createdAt: Date.now() };
-  if (settings.beautify) {
-    const retouch = { enhance: true, legs: anchors ? state.legs : 0, anchors };
+  const photo = { blob: original, createdAt: Date.now(), ...extra };
+  // 分析一次（臉、人物分割、清晰度），之後調整美化不必重跑模型
+  const info = { anchors, level, ...Beauty.analyze(canvas, beautyModels) };
+  photo.info = info;
+  if (settings.beauty.on) {
+    const beauty = { ...settings.beauty };
+    delete beauty.on;
     try {
-      photo.blob = await toJpeg(Retouch.render(canvas, canvas.width, canvas.height, retouch));
+      photo.blob = await toJpeg(Beauty.render(canvas, canvas.width, canvas.height, info, beauty));
       photo.original = original;
-      photo.retouch = retouch;
+      photo.beauty = beauty;
     } catch (err) { console.warn('美化失敗，保留原圖', err); }
   }
   photo.id = await db.add(photo);
   if (isNative && settings.autosave && Native.Gallery) {
     try { await saveToPhoneGallery(photo); } catch (err) { console.warn('存到手機相簿失敗', err); }
   }
+  return photo;
+}
+
+/** 連拍：挑出最佳一張並標記 */
+async function markBestShot(photos) {
+  const best = Beauty.pickBest(photos.map((p) => p.info));
+  const burstId = photos[0].createdAt;
+  for (const [i, p] of photos.entries()) {
+    p.burstId = burstId;
+    if (i === best) p.best = Beauty.bestReason(p.info);
+    await db.put(p);
+  }
+  showToast(`👑 已從 ${photos.length} 張中挑出最佳一張：${photos[best].best}`);
+}
+
+let toastTimer;
+function showToast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 3500);
 }
 
 function flash() {
@@ -379,6 +411,7 @@ async function renderGallery() {
     img.alt = '';
     const badges = document.createElement('span');
     badges.className = 'badges';
+    if (p.best) badges.insertAdjacentHTML('beforeend', '<span title="連拍推薦">👑</span>');
     if (p.original) badges.insertAdjacentHTML('beforeend', '<span title="已美化">✨</span>');
     if (p.galleryUri) badges.insertAdjacentHTML('beforeend', '<span title="已存到手機相簿">✓相簿</span>');
     const check = document.createElement('span');
@@ -453,19 +486,49 @@ function stepViewer(dir) {
 }
 
 /* ---------- 美化面板：原圖／美化對照、長腿程度 ---------- */
+/* 美化面板：選一個項目、用滑桿調整；舊版照片（只有長腿）也相容 */
+const BEAUTY_LABEL = { legs: '長腿', waist: '瘦腰', face: '小臉', skin: '美肌', blur: '背景虛化' };
+const BEAUTY_WHY = {
+  legs: '這張沒拍到完整的腰和腳',
+  waist: '這張沒拍到完整的肩膀和腰',
+  face: '這張沒偵測到臉',
+  skin: '這張沒有人物分割資料',
+  blur: '這張沒有人物分割資料',
+};
+let beautyKey = 'legs';
+
+function photoInfo(photo) {
+  if (photo.info) return photo.info;
+  return { anchors: photo.retouch?.anchors ?? null }; // 舊版照片
+}
+function photoBeauty(photo) {
+  if (photo.beauty) return photo.beauty;
+  return { legs: Math.round((photo.retouch?.legs ?? 0) * 100), waist: 0, face: 0, skin: 0, blur: 0 };
+}
+
 function setupRetouchPanel(photo) {
   const has = !!photo.original;
   $('retouch-panel').classList.toggle('hidden', !has);
   if (!has) return;
-  const canLegs = !!photo.retouch?.anchors;
-  $('legs-row').classList.toggle('hidden', !canLegs);
-  const pct = Math.round((photo.retouch?.legs ?? 0) * 100);
-  $('legs-slider').value = pct;
-  $('legs-value').textContent = `+${pct}%`;
+  const av = Beauty.available(photoInfo(photo));
+  document.querySelectorAll('#beauty-tabs button').forEach((b) => { b.disabled = !av[b.dataset.key]; });
+  if (!av[beautyKey]) beautyKey = Object.keys(BEAUTY_LABEL).find((k) => av[k]) || 'legs';
+  selectBeauty(beautyKey);
   showBefore(false);
-  $('retouch-note').textContent = canLegs
-    ? '已自動調亮並拉長腿部，可用滑桿調整'
-    : '已自動調亮（這張沒有拍到完整的腰和腳，所以沒有做長腿）';
+}
+
+function selectBeauty(key) {
+  beautyKey = key;
+  document.querySelectorAll('#beauty-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.key === key));
+  const av = Beauty.available(photoInfo(current));
+  const val = photoBeauty(current)[key] ?? 0;
+  $('beauty-label').textContent = BEAUTY_LABEL[key];
+  $('beauty-slider').max = key === 'legs' ? 15 : 100;
+  $('beauty-slider').value = val;
+  $('beauty-slider').disabled = !av[key];
+  $('beauty-value').textContent = key === 'legs' ? `+${val}%` : String(val);
+  const note = current.best ? `👑 連拍推薦：${current.best}　` : '';
+  $('retouch-note').textContent = note + (av[key] ? '按住照片可看原圖' : `${BEAUTY_WHY[key]}，所以無法調整${BEAUTY_LABEL[key]}`);
 }
 
 function showBefore(before) {
@@ -477,38 +540,44 @@ function showBefore(before) {
   $('viewer-img').src = viewerUrls[key];
 }
 
-let legsTimer;
-async function applyLegs(pct) {
+let beautyTimer;
+async function applyBeauty(key, value) {
   const photo = current;
+  const beauty = { ...photoBeauty(photo), [key]: value };
   const bitmap = await createImageBitmap(photo.original);
-  const retouch = { ...photo.retouch, legs: pct / 100 };
-  const out = Retouch.render(bitmap, bitmap.width, bitmap.height, retouch);
+  const out = Beauty.render(bitmap, bitmap.width, bitmap.height, photoInfo(photo), beauty);
   bitmap.close?.();
   photo.blob = await toJpeg(out);
-  photo.retouch = retouch;
+  photo.beauty = beauty;
   await db.put(photo);
-  if (current !== photo) return;
-  if (viewerUrls.after) URL.revokeObjectURL(viewerUrls.after);
-  viewerUrls.after = null;
-  showBefore(false);
-  if (retouch.legs > 0) { // 記住喜歡的長腿程度，下次拍照沿用
-    settings.legs = Math.round(retouch.legs * 100);
-    applySettings();
-    saveSettings();
+  // 記住偏好，下次拍照沿用
+  settings.beauty = { ...settings.beauty, [key]: value };
+  saveSettings();
+  applySettings();
+  if (current === photo) {
+    if (viewerUrls.after) URL.revokeObjectURL(viewerUrls.after);
+    viewerUrls.after = null;
+    showBefore(false);
   }
   if (isNative && photo.galleryUri && Native.Gallery) {
     try { await saveToPhoneGallery(photo); } catch (err) { console.warn('更新手機相簿失敗', err); }
   }
 }
 
+$('beauty-tabs').onclick = (e) => {
+  const b = e.target.closest('button[data-key]');
+  if (b && !b.disabled) selectBeauty(b.dataset.key);
+};
+$('beauty-slider').oninput = (e) => {
+  const v = Number(e.target.value);
+  const key = beautyKey;
+  $('beauty-value').textContent = key === 'legs' ? `+${v}%` : String(v);
+  clearTimeout(beautyTimer);
+  beautyTimer = setTimeout(() => applyBeauty(key, v).catch((err) => console.warn(err)), 250);
+};
+
 $('btn-show-before').onclick = () => showBefore(true);
 $('btn-show-after').onclick = () => showBefore(false);
-$('legs-slider').oninput = (e) => {
-  const pct = Number(e.target.value);
-  $('legs-value').textContent = `+${pct}%`;
-  clearTimeout(legsTimer);
-  legsTimer = setTimeout(() => applyLegs(pct).catch((err) => console.warn(err)), 250);
-};
 // 按住照片看原圖、放開回到美化；左右滑動換下一張
 let press = null;
 $('viewer-img').addEventListener('pointerdown', (e) => {
@@ -558,7 +627,8 @@ let lastPoseTs = 0;
 
 async function loadPoseDetector() {
   try {
-    const { FilesetResolver, PoseLandmarker } = await import(`${MP_BASE}/vision_bundle.mjs`);
+    const vision = await import(`${MP_BASE}/vision_bundle.mjs`);
+    const { FilesetResolver, PoseLandmarker } = vision;
     const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
     const create = (delegate) => PoseLandmarker.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: POSE_MODEL, delegate },
@@ -567,10 +637,27 @@ async function loadPoseDetector() {
     });
     poseDetector = await create('GPU').catch(() => create('CPU'));
     poseStatus = 'ready';
+    loadBeautyModels(vision, fileset).catch((err) => console.warn('美化模型載入失敗', err));
   } catch (err) {
     console.warn('人物偵測載入失敗，只使用亮度與角度提示', err);
     poseStatus = 'failed';
   }
+}
+
+/** 美肌、背景虛化、小臉、連拍挑最佳用的模型（人物偵測載入後再載，不影響開相機的速度） */
+const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
+const beautyModels = {};
+
+async function loadBeautyModels({ FaceLandmarker, ImageSegmenter }, fileset) {
+  const opts = (path, delegate) => ({ baseOptions: { modelAssetPath: path, delegate }, runningMode: 'IMAGE' });
+  const withFallback = (make) => make('GPU').catch(() => make('CPU'));
+  beautyModels.face = await withFallback((d) => FaceLandmarker.createFromOptions(fileset, {
+    ...opts(FACE_MODEL, d), numFaces: 1, outputFaceBlendshapes: true,
+  }));
+  beautyModels.segmenter = await withFallback((d) => ImageSegmenter.createFromOptions(fileset, {
+    ...opts(SEG_MODEL, d), outputCategoryMask: true, outputConfidenceMasks: false,
+  }));
 }
 
 addEventListener('deviceorientation', (e) => { sensor.beta = e.beta; });
@@ -644,6 +731,7 @@ function updateHint() {
   if (!pose && hint.level === 'tip' && poseStatus === 'loading') {
     hint = { level: 'tip', text: '人物偵測載入中…' };
   }
+  state.lastLevel = hint.level;
   el.className = `hint ${hint.level}`;
   el.textContent = `${hint.level === 'ok' ? '✅' : hint.level === 'warn' ? '⚠️' : '💡'} ${hint.text}`;
 
@@ -754,8 +842,18 @@ $('modes').onclick = (e) => {
 };
 
 /* ---------- 設定 ---------- */
-const settings = { hints: true, grid: false, beautify: true, legs: 8, autosave: true, mode: 'photo' };
-try { Object.assign(settings, JSON.parse(localStorage.getItem('settings') || '{}')); } catch { /* 無法使用瀏覽器儲存 */ }
+const settings = { hints: true, grid: false, autosave: true, mode: 'photo', beauty: { on: true, ...Beauty.DEFAULTS } };
+try {
+  const saved = JSON.parse(localStorage.getItem('settings') || '{}');
+  // 舊版設定：beautify / legs
+  if (saved.beautify != null || saved.legs != null) {
+    saved.beauty = { on: saved.beautify ?? true, ...Beauty.DEFAULTS, legs: saved.legs ?? Beauty.DEFAULTS.legs };
+    delete saved.beautify;
+    delete saved.legs;
+  }
+  Object.assign(settings, saved);
+  settings.beauty = { on: true, ...Beauty.DEFAULTS, ...settings.beauty };
+} catch { /* 無法使用瀏覽器儲存 */ }
 
 function saveSettings() {
   settings.mode = state.mode;
@@ -764,14 +862,12 @@ function saveSettings() {
 
 function applySettings() {
   state.hints = settings.hints;
-  state.legs = settings.legs / 100;
   $('grid').classList.toggle('hidden', !settings.grid);
   $('set-hints').checked = settings.hints;
   $('set-grid').checked = settings.grid;
-  $('set-beautify').checked = settings.beautify;
-  $('set-legs').value = settings.legs;
-  $('set-legs-value').textContent = `+${settings.legs}%`;
-  $('row-legs').classList.toggle('hidden', !settings.beautify);
+  $('set-beautify').checked = settings.beauty.on;
+  const b = settings.beauty;
+  $('beauty-summary').textContent = `目前：長腿 +${b.legs}%、瘦腰 ${b.waist}、小臉 ${b.face}、美肌 ${b.skin}、虛化 ${b.blur}`;
   $('set-autosave').checked = settings.autosave;
   $('row-autosave').classList.toggle('hidden', !isNative);
   if (!settings.hints && state.auto) setMode('photo');
@@ -781,10 +877,15 @@ function applySettings() {
 $('btn-settings').onclick = () => $('settings').showModal();
 $('btn-settings-close').onclick = () => $('settings').close();
 $('settings').addEventListener('click', (e) => { if (e.target === $('settings')) $('settings').close(); }); // 點面板外面關閉
-for (const [id, key] of [['set-hints', 'hints'], ['set-grid', 'grid'], ['set-beautify', 'beautify'], ['set-autosave', 'autosave']]) {
+for (const [id, key] of [['set-hints', 'hints'], ['set-grid', 'grid'], ['set-autosave', 'autosave']]) {
   $(id).onchange = (e) => { settings[key] = e.target.checked; applySettings(); saveSettings(); };
 }
-$('set-legs').oninput = (e) => { settings.legs = Number(e.target.value); applySettings(); saveSettings(); };
+$('set-beautify').onchange = (e) => { settings.beauty.on = e.target.checked; applySettings(); saveSettings(); };
+$('btn-beauty-reset').onclick = () => {
+  settings.beauty = { on: settings.beauty.on, ...Beauty.DEFAULTS };
+  applySettings();
+  saveSettings();
+};
 
 $('btn-gallery').onclick = () => showView('gallery');
 $('btn-tips').onclick = () => { $('settings').close(); showView('tips'); };

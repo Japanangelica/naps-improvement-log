@@ -31,6 +31,7 @@
       <div id="flash" class="flash"></div>
       <div id="focus-ring" class="focus-ring"></div>
       <div id="hint" class="hint tip">準備中…</div>
+      <div id="toast" class="toast hidden" role="status"></div>
       <div id="lens-bar" class="lens-bar hidden">
         <div id="zoom-levels" class="zoom-levels"></div>
         <button id="btn-lens" class="hidden">鏡頭</button>
@@ -67,8 +68,8 @@
     </div>
     <label class="row"><span><b>構圖提示與導引</b><small>骨架、腳底目標線、方向箭頭</small></span><input type="checkbox" class="switch" id="set-hints" checked></label>
     <label class="row"><span><b>九宮格線</b><small>幫助對齊水平與構圖</small></span><input type="checkbox" class="switch" id="set-grid"></label>
-    <label class="row"><span><b>自動美化</b><small>調亮、提升氣色、長腿</small></span><input type="checkbox" class="switch" id="set-beautify" checked></label>
-    <label class="row" id="row-legs"><span><b>長腿程度</b><small>拍照時預設套用</small></span><span class="range"><input type="range" id="set-legs" min="0" max="15" step="1" value="8"><output id="set-legs-value">+8%</output></span></label>
+    <label class="row"><span><b>自動美化</b><small>長腿、瘦腰、小臉、美肌、背景虛化；程度會記住你在相簿最後的調整</small></span><input type="checkbox" class="switch" id="set-beautify" checked></label>
+    <button class="row link" id="btn-beauty-reset"><span><b>美化程度恢復預設</b><small id="beauty-summary"></small></span><span class="chev">↺</span></button>
     <label class="row" id="row-autosave"><span><b>自動存到手機相簿</b><small>三星相簿裡的「拍照App」相簿</small></span><input type="checkbox" class="switch" id="set-autosave" checked></label>
     <button class="row link" id="btn-tips"><span><b>拍照教學</b><small>怎麼拍出好看的照片</small></span><span class="chev">›</span></button>
   </dialog>
@@ -196,10 +197,17 @@
         <button type="button" id="btn-show-before">原圖</button>
         <button type="button" id="btn-show-after" class="active">✨ 美化</button>
       </div>
-      <label class="legs" id="legs-row">
-        <span>長腿</span>
-        <input type="range" id="legs-slider" min="0" max="15" step="1" value="8">
-        <output id="legs-value">+8%</output>
+      <div class="beauty-tabs" id="beauty-tabs" role="tablist" aria-label="美化項目">
+        <button type="button" role="tab" data-key="legs">長腿</button>
+        <button type="button" role="tab" data-key="waist">瘦腰</button>
+        <button type="button" role="tab" data-key="face">小臉</button>
+        <button type="button" role="tab" data-key="skin">美肌</button>
+        <button type="button" role="tab" data-key="blur">背景虛化</button>
+      </div>
+      <label class="legs" id="beauty-row">
+        <span id="beauty-label">長腿</span>
+        <input type="range" id="beauty-slider" min="0" max="100" step="1" value="0">
+        <output id="beauty-value">0</output>
       </label>
       <p id="retouch-note" class="retouch-note"></p>
     </div>
@@ -213,6 +221,7 @@
 
   <script src="hints.js"></script>
   <script src="retouch.js"></script>
+  <script src="beauty.js"></script>
   <script src="guide.js"></script>
   <script src="app.js"></script>
 </body>

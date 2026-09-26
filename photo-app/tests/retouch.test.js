@@ -16,17 +16,25 @@ function lm({ hipY = 0.55, eyeY = 0.12, mouthY = 0.16, ankleVis = 1 } = {}) {
 test('看得到髖部和腳踝才做長腿', () => {
   const a = poseAnchors(lm());
   assert.ok(Math.abs(a.hipY - 0.55) < 1e-9);
+  assert.ok(Math.abs(a.ankleY - 0.95) < 1e-9);
   assert.ok(Math.abs(a.headTop - (0.12 - 0.04 * 1.6)) < 1e-9);
   assert.strictEqual(poseAnchors(lm({ ankleVis: 0.1 })), null);
   assert.strictEqual(poseAnchors(null), null);
 });
 
-test('拉伸倍率從腰部 1 倍漸增，整段平均為 1 + amount', () => {
+test('拉伸倍率在腰部和腳踝都是 1 倍，整段平均為 1 + amount', () => {
   assert.strictEqual(rowScale(0, 0.08), 1);
+  assert.strictEqual(rowScale(1, 0.08), 1);
   const n = 10000;
   let sum = 0;
   for (let i = 0; i < n; i++) sum += rowScale((i + 0.5) / n, 0.08);
   assert.ok(Math.abs(sum / n - 1.08) < 1e-3);
+});
+
+test('只拉長腰到腳踝，腳掌不拉', () => {
+  const plan = legPlan({ hipY: 0.5, headTop: 0.2, ankleY: 0.89 }, 4000, 0.1);
+  assert.strictEqual(plan.span, 1600); // (0.89 + 0.01) × 4000 − 2000
+  assert.ok(Math.abs(plan.added - 160) <= 1);
 });
 
 test('頭頂留白夠時裁掉上方，照片高度不變', () => {
