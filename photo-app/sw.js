@@ -1,5 +1,5 @@
-const CACHE = 'photo-app-v1';
-const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'manifest.json', 'icon.svg'];
+const CACHE = 'photo-app-v2';
+const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'hints.js', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));

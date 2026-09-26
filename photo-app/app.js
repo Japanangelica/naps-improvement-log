@@ -7,6 +7,8 @@ const state = {
   facingMode: 'environment',
   filter: 'none',
   timer: 0,           // 0 / 3 / 10 秒
+  burst: false,       // 連拍 5 張
+  hints: true,
   stream: null,
   busy: false,
 };
@@ -81,24 +83,32 @@ async function takePhoto() {
     }
     $('countdown').classList.add('hidden');
 
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.filter = state.filter;
-    if (state.facingMode === 'user') {
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
+    const shots = state.burst ? 5 : 1;
+    const pending = [];
+    for (let i = 0; i < shots; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 200));
+      pending.push(capture().then((blob) => db.add({ blob, createdAt: Date.now() })));
+      flash();
     }
-    ctx.drawImage(video, 0, 0);
-
-    flash();
-    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
-    await db.add({ blob, createdAt: Date.now() });
+    await Promise.all(pending);
     await refreshThumb();
   } finally {
     state.busy = false;
   }
+}
+
+function capture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.filter = state.filter;
+  if (state.facingMode === 'user') {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(video, 0, 0);
+  return new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
 }
 
 function flash() {
@@ -159,11 +169,91 @@ function fileName(p) {
 }
 
 function showView(name) {
-  const toGallery = name === 'gallery';
-  $('camera-view').classList.toggle('hidden', toGallery);
-  $('gallery-view').classList.toggle('hidden', !toGallery);
-  if (toGallery) { stopCamera(); renderGallery(); }
-  else { revokeUrls(); startCamera(); }
+  for (const v of ['camera', 'gallery', 'tips']) {
+    $(`${v}-view`).classList.toggle('hidden', v !== name);
+  }
+  if (name === 'camera') { revokeUrls(); startCamera(); }
+  else stopCamera();
+  if (name === 'gallery') renderGallery();
+}
+
+/* ---------- 構圖提示 ---------- */
+const MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const POSE_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+
+const sensor = { gravity: null, beta: null };
+let poseDetector = null;
+let poseStatus = 'loading'; // loading / ready / failed
+let lastPoseTs = 0;
+
+async function loadPoseDetector() {
+  try {
+    const { FilesetResolver, PoseLandmarker } = await import(`${MP_BASE}/vision_bundle.mjs`);
+    const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+    const create = (delegate) => PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: POSE_MODEL, delegate },
+      runningMode: 'VIDEO',
+      numPoses: 1,
+    });
+    poseDetector = await create('GPU').catch(() => create('CPU'));
+    poseStatus = 'ready';
+  } catch (err) {
+    console.warn('人物偵測載入失敗，只使用亮度與角度提示', err);
+    poseStatus = 'failed';
+  }
+}
+
+addEventListener('deviceorientation', (e) => { sensor.beta = e.beta; });
+addEventListener('devicemotion', (e) => { sensor.gravity = e.accelerationIncludingGravity; });
+
+// iOS 需要使用者點擊後才能要求感測器權限
+async function requestSensorPermission() {
+  for (const Ev of [window.DeviceOrientationEvent, window.DeviceMotionEvent]) {
+    if (typeof Ev?.requestPermission === 'function') {
+      try { await Ev.requestPermission(); } catch { /* 使用者拒絕 */ }
+    }
+  }
+}
+
+const lightCanvas = document.createElement('canvas');
+lightCanvas.width = 48;
+lightCanvas.height = 64;
+const lightCtx = lightCanvas.getContext('2d', { willReadFrequently: true });
+
+function readMotion() {
+  const g = sensor.gravity;
+  if (!g || g.x == null) return null;
+  const portrait = Math.abs(g.y) >= Math.abs(g.x);
+  // 手機幾乎平放時，歪斜角度沒有意義
+  const flat = Math.abs(g.z) > 0.8 * Math.hypot(g.x, g.y, g.z);
+  return {
+    tilt: flat ? 0 : Hints.tiltFromGravity(g),
+    pitchDown: Hints.pitchDownFromBeta(sensor.beta, portrait),
+  };
+}
+
+function updateHint() {
+  const el = $('hint');
+  const active = state.hints && state.stream && video.videoWidth && !$('camera-view').classList.contains('hidden');
+  el.classList.toggle('hidden', !active);
+  if (!active) return;
+
+  lightCtx.drawImage(video, 0, 0, lightCanvas.width, lightCanvas.height);
+  const light = Hints.measureLight(lightCtx, lightCanvas.width, lightCanvas.height);
+
+  let pose = null;
+  if (poseDetector) {
+    const ts = Math.max(performance.now(), lastPoseTs + 1);
+    lastPoseTs = ts;
+    pose = poseDetector.detectForVideo(video, ts).landmarks?.[0] ?? null;
+  }
+
+  let hint = Hints.analyze({ light, motion: readMotion(), pose });
+  if (!pose && hint.level === 'tip' && poseStatus === 'loading') {
+    hint = { level: 'tip', text: '人物偵測載入中…' };
+  }
+  el.className = `hint ${hint.level}`;
+  el.textContent = `${hint.level === 'ok' ? '✅' : hint.level === 'warn' ? '⚠️' : '💡'} ${hint.text}`;
 }
 
 /* ---------- 事件 ---------- */
@@ -189,8 +279,20 @@ $('filters').onclick = (e) => {
   state.filter = btn.dataset.filter;
   video.style.filter = state.filter === 'none' ? '' : state.filter;
 };
+$('btn-hints').onclick = (e) => {
+  state.hints = !state.hints;
+  e.currentTarget.classList.toggle('on', state.hints);
+  updateHint();
+};
+$('btn-burst').onclick = (e) => {
+  state.burst = !state.burst;
+  $('burst-label').textContent = state.burst ? '5張' : '關';
+  e.currentTarget.classList.toggle('on', state.burst);
+};
 $('btn-gallery').onclick = () => showView('gallery');
-$('btn-back').onclick = () => showView('camera');
+$('btn-tips').onclick = () => showView('tips');
+document.querySelectorAll('.btn-back-camera').forEach((b) => { b.onclick = () => showView('camera'); });
+document.addEventListener('click', requestSensorPermission, { once: true });
 
 $('btn-close').onclick = () => $('viewer').close();
 $('btn-download').onclick = () => {
@@ -229,6 +331,10 @@ document.addEventListener('visibilitychange', () => {
 /* ---------- 啟動 ---------- */
 startCamera();
 refreshThumb();
+loadPoseDetector();
+setInterval(() => {
+  try { updateHint(); } catch (err) { console.warn(err); }
+}, 300);
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
