@@ -39,20 +39,58 @@
 1. 將此分支合併到 `main`
 2. 到 GitHub repo → **Settings → Pages → Source** 選 **GitHub Actions**
 3. 之後每次 `photo-app/` 有變更，會自動部署到
-   `https://<帳號>.github.io/naps-improvement-log/`
+   `https://japanangelica.github.io/naps-improvement-log/`
 
 > 相機功能必須在 HTTPS（或 localhost）下才能使用，GitHub Pages 預設即為 HTTPS。
+
+## 下載 APK（Android App）
+合併到 `main` 後，GitHub Actions 會自動編譯 APK，並放到固定的下載網址：
+
+**https://github.com/Japanangelica/naps-improvement-log/releases/latest/download/photo-app.apk**
+
+安裝方式（S24 Ultra）：
+1. 用手機的 Chrome 打開上面的網址，下載 `photo-app.apk`
+2. 點開下載的檔案 → 若出現「基於安全性考量…」，按「設定」→ 開啟「允許此來源」
+3. 按「安裝」→ 打開 App → 允許相機權限
+
+APK 版和網頁版功能相同，差別是：
+- 全螢幕、沒有網址列，桌面上就是一個 App
+- 「下載」會把照片存到 **我的檔案 → 文件 → 拍照App**；「分享」可直接傳到 LINE、IG、相簿等
+- 人物偵測模型第一次使用時仍需要網路下載
+
+### 簽署金鑰（建議設定，只需一次）
+沒有設定時，APK 會用暫時的 debug 金鑰簽署，**每次更新都要先解除安裝舊版**（App 裡的照片會一起刪除）。
+設定正式金鑰後就能直接覆蓋更新。到 repo 的 **Settings → Secrets and variables → Actions → New repository secret** 新增 4 個：
+
+| 名稱 | 內容 |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | keystore 檔案的 base64 文字 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密碼 |
+| `ANDROID_KEY_ALIAS` | 金鑰別名 |
+| `ANDROID_KEY_PASSWORD` | 金鑰密碼 |
+
+> 這個 repo 是公開的，金鑰檔案和密碼**絕對不要**放進程式碼裡，只放在 Secrets。
+
+## 專案結構
+```
+photo-app/
+├── www/                 網頁本體（GitHub Pages 與 APK 共用）
+├── android/             Capacitor 產生的 Android 專案
+├── capacitor.config.json
+└── tests/               單元測試
+```
 
 ## 本機測試
 ```bash
 cd photo-app
-python3 -m http.server 8000
+python3 -m http.server 8000 --directory www
 # 開啟 http://localhost:8000
 ```
 
 ## 測試
 ```bash
 cd photo-app
+npm install
 npm test   # 構圖提示邏輯的單元測試
 ```
 

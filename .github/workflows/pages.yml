@@ -3,7 +3,7 @@ name: Deploy photo app to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ['photo-app/**']
+    paths: ['photo-app/www/**']
   workflow_dispatch:
 
 permissions:
@@ -26,6 +26,6 @@ jobs:
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: photo-app
+          path: photo-app/www
       - id: deployment
         uses: actions/deploy-pages@v4

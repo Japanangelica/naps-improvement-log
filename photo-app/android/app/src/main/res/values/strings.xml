@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">拍照 App</string>
+    <string name="title_activity_main">拍照 App</string>
+    <string name="package_name">tw.aaron.photoapp</string>
+    <string name="custom_url_scheme">tw.aaron.photoapp</string>
+</resources>

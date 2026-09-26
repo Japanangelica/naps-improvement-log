@@ -304,7 +304,7 @@ let current = null;
 function openViewer(photo, url) {
   current = photo;
   $('viewer-img').src = url;
-  $('btn-share').classList.toggle('hidden', !navigator.canShare);
+  $('btn-share').classList.toggle('hidden', !navigator.canShare && !isNative);
   $('viewer').showModal();
 }
 
@@ -492,13 +492,49 @@ document.querySelectorAll('.btn-back-camera').forEach((b) => { b.onclick = () =>
 document.addEventListener('click', requestSensorPermission, { once: true });
 
 $('btn-close').onclick = () => $('viewer').close();
-$('btn-download').onclick = () => {
+/* ---------- APK（Capacitor）原生功能 ---------- */
+const isNative = !!window.Capacitor?.isNativePlatform?.();
+const Native = window.Capacitor?.Plugins ?? {};
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function nativeSave(photo) {
+  const path = `拍照App/${fileName(photo)}`;
+  await Native.Filesystem.writeFile({
+    path, data: await blobToBase64(photo.blob), directory: 'DOCUMENTS', recursive: true,
+  });
+  alert(`已儲存到「文件 / ${path}」`);
+}
+
+async function nativeShare(photo) {
+  const { uri } = await Native.Filesystem.writeFile({
+    path: fileName(photo), data: await blobToBase64(photo.blob), directory: 'CACHE',
+  });
+  await Native.Share.share({ files: [uri], dialogTitle: '分享照片' });
+}
+
+$('btn-download').onclick = async () => {
+  if (isNative) {
+    try { await nativeSave(current); } catch (err) { alert(`儲存失敗：${err.message}`); }
+    return;
+  }
   const a = document.createElement('a');
   a.href = $('viewer-img').src;
   a.download = fileName(current);
   a.click();
 };
 $('btn-share').onclick = async () => {
+  if (isNative) {
+    try { await nativeShare(current); } catch { /* 使用者取消 */ }
+    return;
+  }
   const file = new File([current.blob], fileName(current), { type: 'image/jpeg' });
   if (navigator.canShare?.({ files: [file] })) {
     try { await navigator.share({ files: [file] }); } catch { /* 使用者取消 */ }
@@ -557,6 +593,7 @@ loadPoseDetector();
 setInterval(() => {
   try { updateHint(); } catch (err) { console.warn(err); }
 }, 300);
-if ('serviceWorker' in navigator) {
+// APK 內的檔案本來就在手機上，不需要 Service Worker 快取
+if ('serviceWorker' in navigator && !isNative) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

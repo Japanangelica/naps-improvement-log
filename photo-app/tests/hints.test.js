@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { analyze, tiltFromGravity, pitchDownFromBeta, measureLight, cropRect, mapPose } = require('../hints.js');
+const { analyze, tiltFromGravity, pitchDownFromBeta, measureLight, cropRect, mapPose } = require('../www/hints.js');
 
 /** 產生一個站立人物的 33 點骨架：headTop 為頭頂 y，feetY 為腳底 y */
 function person({ headTop = 0.1, feetY = 0.95, feetVisible = true } = {}) {
