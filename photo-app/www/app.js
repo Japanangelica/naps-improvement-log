@@ -268,7 +268,45 @@ function updateQueueBadge() {
   const n = queue.reduce((sum, job) => sum + job.length, 0) + (processing ? 1 : 0);
   $('queue-badge').textContent = n ? `美化中 ${n}` : '';
   $('queue-badge').classList.toggle('hidden', !n);
+  $('import-status').textContent = n ? `✨ 修圖中，還有 ${n} 張…（可以先看已完成的照片）` : '';
+  $('import-status').classList.toggle('hidden', !n);
 }
+
+/* ---------- 從相簿匯入（用三星相機拍，再到這裡修圖） ---------- */
+const IMPORT_MAX_SIDE = 4000;   // 5000 萬、2 億畫素模式的照片縮到最長邊 4000，避免記憶體不足
+const BEST_PICK_MAX = 20;       // 一次選 2～20 張時，當作一組連拍挑最佳
+
+function importJob(file) {
+  return {
+    extra: { createdAt: file.lastModified || Date.now(), imported: true, sourceName: file.name },
+    async load() {
+      // from-image：依照片裡記錄的方向轉正（三星直拍的照片方向存在 EXIF）
+      const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      const k = Math.min(1, IMPORT_MAX_SIDE / Math.max(bmp.width, bmp.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bmp.width * k);
+      canvas.height = Math.round(bmp.height * k);
+      canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      bmp.close();
+      return { canvas, level: 'tip' };
+    },
+  };
+}
+
+function importFiles(fileList) {
+  const files = [...fileList].filter((f) => f.type.startsWith('image/'));
+  if (!files.length) return;
+  const jobs = files.map(importJob);
+  if (jobs.length >= 2 && jobs.length <= BEST_PICK_MAX) queue.push(jobs); // 一組，會挑最佳
+  else jobs.forEach((j) => queue.push([j]));
+  updateQueueBadge();
+  if (!processing) runQueue();
+}
+
+$('import-input').addEventListener('change', (e) => {
+  importFiles(e.target.files);
+  e.target.value = ''; // 同一批照片可以再選一次
+});
 
 let lastShot = 0;
 function enqueue(frames) {
@@ -293,8 +331,16 @@ async function runQueue() {
     try {
       while (frames.length) {
         updateQueueBadge();
-        await waitForPause();
-        saved.push(await savePhoto(frames.shift()));
+        const job = frames.shift();
+        if (job.load) {
+          // 匯入的照片：輪到它時才讀檔，避免一次把很多張大照片放進記憶體
+          const frame = await job.load().catch((err) => { console.warn('無法讀取照片', err); return null; });
+          if (frame) saved.push(await savePhoto(frame, job.extra));
+        } else {
+          await waitForPause();
+          saved.push(await savePhoto(job));
+        }
+        if (!$('gallery-view').classList.contains('hidden')) renderGallery();
       }
       if (saved.length > 1) await markBestShot(saved);
       await refreshThumb();
@@ -420,6 +466,11 @@ async function markBestShot(photos) {
     await db.put(p);
   }
   showToast(`👑 已從 ${photos.length} 張中挑出最佳一張：${photos[best].best}`);
+  if (!$('gallery-view').classList.contains('hidden')) {
+    $('import-status').textContent = `👑 已從 ${photos.length} 張中挑出最佳一張（標有皇冠）`;
+    $('import-status').classList.remove('hidden');
+    setTimeout(updateQueueBadge, 4000);
+  }
 }
 
 let toastTimer;
@@ -481,13 +532,15 @@ function formatMB(bytes) {
 
 async function renderGallery() {
   revokeUrls();
-  galleryList = (await db.all()).reverse();
+  galleryList = (await db.all()).sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
   const g = $('gallery');
   g.innerHTML = '';
   g.classList.toggle('selecting', selecting);
   $('count').textContent = galleryList.length ? `(${galleryList.length})` : '';
   $('empty').classList.toggle('hidden', galleryList.length > 0);
+  g.classList.toggle('hidden', galleryList.length === 0);
   $('btn-select').classList.toggle('hidden', galleryList.length === 0 && !selecting);
+  $('storage-info').classList.toggle('hidden', galleryList.length === 0);
 
   const bytes = galleryList.reduce((n, p) => n + (p.blob?.size || 0) + (p.original?.size || 0), 0);
   const saved = galleryList.filter((p) => p.galleryUri).length;
@@ -518,7 +571,8 @@ async function renderGallery() {
     img.alt = '';
     const badges = document.createElement('span');
     badges.className = 'badges';
-    if (p.best) badges.insertAdjacentHTML('beforeend', '<span title="連拍推薦">👑</span>');
+    if (p.best) badges.insertAdjacentHTML('beforeend', '<span title="推薦">👑</span>');
+    if (p.imported) badges.insertAdjacentHTML('beforeend', '<span title="從相簿匯入">匯入</span>');
     if (p.original) badges.insertAdjacentHTML('beforeend', '<span title="已美化">✨</span>');
     if (p.galleryUri) badges.insertAdjacentHTML('beforeend', '<span title="已存到手機相簿">✓相簿</span>');
     const check = document.createElement('span');
@@ -639,7 +693,7 @@ function selectBeauty(key) {
   const nobody = current.info && !info.framing && !info.face;
   const note = (current.best ? `👑 連拍推薦：${current.best}　` : '') +
     (nobody ? '這張沒偵測到人物（可能背對、太遠或太暗），只做了調亮。' : '');
-  $('retouch-note').textContent = note + (av[key] ? '按住照片可看原圖' : `${BEAUTY_WHY[key]}，所以無法調整${BEAUTY_LABEL[key]}`);
+  $('retouch-note').textContent = note + (av[key] ? '按住照片可看原圖' : nobody ? '' : `${BEAUTY_WHY[key]}，所以無法調整${BEAUTY_LABEL[key]}`);
 }
 
 function showBefore(before) {

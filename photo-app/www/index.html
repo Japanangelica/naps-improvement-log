@@ -81,11 +81,21 @@
     <header>
       <button class="btn-back-camera">← 返回</button>
       <h1>相簿 <small id="count"></small></h1>
-      <button id="btn-select" class="head-action">選取</button>
+      <span class="head-actions">
+        <label class="head-action import-btn" for="import-input">＋ 匯入</label>
+        <button id="btn-select" class="head-action">選取</button>
+      </span>
     </header>
+    <input type="file" id="import-input" accept="image/*" multiple hidden>
+    <p id="import-status" class="import-status hidden" role="status"></p>
     <p id="storage-info" class="storage-info"></p>
     <div id="gallery" class="gallery"></div>
-    <p id="empty" class="empty hidden">還沒有照片，回去拍一張吧！</p>
+    <div id="empty" class="empty hidden">
+      <p><b>用三星相機拍，再來這裡修圖</b></p>
+      <p>三星內建相機的畫質最好。拍完回到這裡按「匯入」，App 會自動修正構圖、長腿、美肌；一次選多張連拍，會自動挑出最好的一張。</p>
+      <label class="import-big" for="import-input">＋ 從相簿匯入照片</label>
+      <p class="empty-note">原本的照片不會被修改。</p>
+    </div>
     <div id="select-bar" class="select-bar hidden">
       <span id="select-count">已選 0 張</span>
       <button id="btn-select-share">分享</button>
@@ -100,6 +110,16 @@
       <span></span>
     </header>
     <div class="tips">
+      <article class="best-way">
+        <h2>★ 最推薦的用法：三星相機拍、App 修</h2>
+        <ul>
+          <li>用<b>三星內建相機</b>拍（畫質最好，夜景、逆光都比較穩）。建議開連拍多拍幾張。</li>
+          <li>回到本 App → <b>相簿 → ＋ 匯入</b>，一次選多張。</li>
+          <li>App 會自動<b>修正構圖</b>（裁掉太多的地板、天空）、長腿、美肌，並從多張裡<b>挑出最好的一張</b>（有皇冠 👑）。</li>
+          <li>修好的照片會存在手機相簿的「拍照App」，原本的照片不會被修改。</li>
+        </ul>
+      </article>
+
       <p class="lead">網路上教「男友怎麼幫女友拍照」的文章很多，整理出最常被提到、最有效的幾招。拍照時畫面上的 💡 提示也是依照這些原則判斷的。</p>
 
       <article>
