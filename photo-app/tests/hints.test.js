@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { analyze, tiltFromGravity, pitchDownFromBeta, measureLight } = require('../hints.js');
+const { analyze, tiltFromGravity, pitchDownFromBeta, measureLight, cropRect, mapPose } = require('../hints.js');
 
 /** 產生一個站立人物的 33 點骨架：headTop 為頭頂 y，feetY 為腳底 y */
 function person({ headTop = 0.1, feetY = 0.95, feetVisible = true } = {}) {
@@ -82,4 +82,17 @@ test('亮度量測分中央與四周', () => {
   }
   const r = measureLight({ getImageData: () => ({ data }) }, w, h);
   assert.ok(r.center < 1 && r.edges > 254);
+});
+
+test('畫面比例裁切：3:4 影像裁成 9:16 與 1:1', () => {
+  assert.deepStrictEqual(cropRect(3000, 4000, null), { sx: 0, sy: 0, sw: 3000, sh: 4000 });
+  assert.deepStrictEqual(cropRect(3000, 4000, 9 / 16), { sx: 375, sy: 0, sw: 2250, sh: 4000 });
+  assert.deepStrictEqual(cropRect(3000, 4000, 1), { sx: 0, sy: 500, sw: 3000, sh: 3000 });
+});
+
+test('裁成 1:1 後，原本在畫面內的腳可能被切掉', () => {
+  const crop = cropRect(3000, 4000, 1);
+  const [p] = mapPose([{ x: 0.5, y: 0.9, visibility: 1 }], 3000, 4000, crop);
+  assert.ok(Math.abs(p.x - 0.5) < 1e-9);
+  assert.ok(p.y > 1); // 0.9 × 4000 = 3600，超出裁切下緣 3500
 });

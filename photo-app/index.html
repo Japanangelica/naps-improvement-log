@@ -13,8 +13,10 @@
 <body>
   <main id="camera-view" class="view">
     <div class="viewfinder" id="viewfinder">
-      <video id="video" autoplay playsinline muted></video>
-      <div id="grid" class="grid hidden"></div>
+      <div id="frame" class="frame">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="grid" class="grid hidden"></div>
+      </div>
       <div id="countdown" class="countdown hidden"></div>
       <div id="flash" class="flash"></div>
       <div id="focus-ring" class="focus-ring"></div>
@@ -38,10 +40,11 @@
     <div class="toolbar top">
       <button id="btn-hints" class="on" title="構圖提示">💡 提示</button>
       <button id="btn-torch" class="hidden" title="補光燈">🔦</button>
-      <button id="btn-burst" title="連拍">連拍 <span id="burst-label">關</span></button>
-      <button id="btn-timer" title="倒數計時">⏱ <span id="timer-label">關</span></button>
+      <button id="btn-burst" title="連拍">連拍<span id="burst-label"></span></button>
+      <button id="btn-timer" title="倒數計時">⏱<span id="timer-label"></span></button>
+      <button id="btn-ratio" title="畫面比例">比例</button>
       <button id="btn-grid" title="格線">＃</button>
-      <button id="btn-tips" title="拍照教學">📖 教學</button>
+      <button id="btn-tips" title="拍照教學">📖</button>
     </div>
 
     <div class="controls">
@@ -127,6 +130,18 @@
         </ul>
       </article>
 
+      <article>
+        <h2>⑦ S24 Ultra 專屬小技巧</h2>
+        <ul>
+          <li><b>拍全身、要腿長：用 1x</b>，蹲低往上拍、腳底貼下緣。</li>
+          <li><b>0.6x 超廣角</b>會讓畫面邊緣的東西被拉長：把腳放在畫面下緣可以讓腿更長，但<b>臉不要放在邊緣或角落</b>，否則會變形。靠太近拍臉也會變大餅臉。</li>
+          <li><b>半身、特寫：用 2x 或 3x</b>。人往後退幾步再放大，臉的比例最自然，背景也會比較模糊、乾淨。這是最不容易被罵的焦段。</li>
+          <li><b>5x</b> 適合拍遠一點的她和風景，背景的山、建築會被「拉近」，很有氣勢。</li>
+          <li>比例選 <b>9:16</b> 適合 IG／FB 限時動態，<b>1:1</b> 適合貼文，<b>3:4</b> 保留最多畫面，之後還能自己裁切。</li>
+          <li>晚上光線不夠時，開 <b>⏱ 3 秒倒數</b>，把手機靠在桌上或牆上，照片比較不會糊。</li>
+        </ul>
+      </article>
+
       <article class="refs">
         <h2>參考資料</h2>
         <ul>
@@ -138,6 +153,12 @@
           <li><a href="https://www.purewow.com/beauty/how-to-look-taller-in-pictures" target="_blank" rel="noopener">PureWow：How to Look Taller in Pictures</a></li>
           <li><a href="https://melmagazine.com/en-us/story/how-to-take-pictures-of-your-girlfriend-that-she-wont-hate" target="_blank" rel="noopener">MEL：How to Take Pictures of Your Girlfriend That She Won’t Hate</a></li>
         </ul>
+      </article>
+      <article class="refs">
+        <h2>相機資訊</h2>
+        <p class="note">如果某個功能在你的手機上怪怪的，可以把下面的資訊複製給開發者，方便針對機型調整。</p>
+        <pre id="device-info" class="device-info"></pre>
+        <button id="btn-copy-info" class="copy-btn">複製相機資訊</button>
       </article>
     </div>
   </section>

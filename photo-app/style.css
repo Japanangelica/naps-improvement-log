@@ -7,8 +7,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 /* Camera */
 .viewfinder { position: relative; flex: 1; overflow: hidden; background: #000; }
-/* contain：預覽範圍 = 實際拍到的範圍（跟三星相機一樣 4:3 預覽） */
-#video { width: 100%; height: 100%; object-fit: contain; touch-action: none; }
+/* 預覽框依選定比例縮放，預覽範圍 = 實際拍到的範圍 */
+.frame { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%; height: 100%; overflow: hidden; }
+#video { width: 100%; height: 100%; object-fit: cover; touch-action: none; display: block; }
 #video.mirror { transform: scaleX(-1); }
 .grid { position: absolute; inset: 0; pointer-events: none;
   background:
@@ -78,3 +79,6 @@ dialog::backdrop { background: rgba(0,0,0,.9); }
 .tips b { color: #fff; }
 .tips .refs h2 { color: #bbb; }
 .tips .refs a { color: #8ab4f8; word-break: break-word; }
+.tips .note { color: #bbb; font-size: 14px; margin-bottom: 8px; }
+.device-info { background: #000; color: #9fe39f; padding: 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; }
+.copy-btn { margin-top: 8px; padding: 8px 14px; border-radius: 8px; background: #262626; }

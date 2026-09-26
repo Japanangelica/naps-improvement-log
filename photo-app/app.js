@@ -18,7 +18,26 @@ const state = {
   zoom: 1,
   torch: false,
   wakeLock: null,
+  ratio: null,       // 畫面比例（寬/高）：null = 原始
+  settings: {},      // 目前鏡頭的實際解析度等設定
 };
+
+const RATIO_NAMES = [[3 / 4, '3:4'], [4 / 3, '4:3'], [9 / 16, '9:16'], [16 / 9, '16:9'], [1, '1:1']];
+const RATIO_CHOICES = [null, 3 / 4, 9 / 16, 1];
+
+function ratioLabel(r) {
+  const found = RATIO_NAMES.find(([v]) => Math.abs(v - r) / v < 0.02);
+  return found ? found[1] : '原始';
+}
+const nativeRatio = () => video.videoWidth / video.videoHeight;
+/** 可選的比例：原始比例，加上與原始不同的 3:4、9:16、1:1 */
+function ratioOptions() {
+  const n = nativeRatio();
+  return RATIO_CHOICES.filter((v) => v === null || !n || Math.abs(v - n) / v >= 0.02);
+}
+function updateRatioLabel() {
+  $('btn-ratio').textContent = ratioLabel(state.ratio ?? nativeRatio());
+}
 
 /* ---------- IndexedDB 照片儲存 ---------- */
 const db = {
@@ -60,8 +79,9 @@ async function startCamera() {
       video: {
         ...(back ? { deviceId: { exact: back.deviceId } } : { facingMode: state.facingMode }),
         // 三星相機預設 4:3，要求較高解析度，實際會取最接近的支援規格
-        width: { ideal: 2560 },
-        height: { ideal: 1920 },
+        // S24 Ultra 等高階機可提供到 4000×3000（1200 萬畫素）
+        width: { ideal: 4000 },
+        height: { ideal: 3000 },
       },
       audio: false,
     });
@@ -69,6 +89,7 @@ async function startCamera() {
     video.classList.toggle('mirror', state.facingMode === 'user');
     state.track = state.stream.getVideoTracks()[0];
     state.caps = state.track.getCapabilities?.() ?? {};
+    state.settings = state.track.getSettings?.() ?? {};
     state.zoom = 1;
     state.torch = false;
     await listBackCameras();
@@ -113,7 +134,8 @@ function updateCameraControls() {
   lensBtn.classList.toggle('hidden', !multiLens);
   lensBtn.textContent = `鏡頭 ${state.backIndex + 1}/${state.backCams.length}`;
 
-  const levels = zoom ? [zoom.min, 1, 2, 4].filter((z, i, a) => z >= zoom.min && z <= zoom.max && a.indexOf(z) === i) : [];
+  // 對齊三星相機的變焦段位：0.6x 超廣角、1x、2x、3x／5x 望遠、10x
+  const levels = zoom ? [zoom.min, 1, 2, 3, 5, 10].filter((z, i, a) => z >= zoom.min && z <= zoom.max && a.indexOf(z) === i) : [];
   const box = $('zoom-levels');
   box.innerHTML = '';
   if (levels.length > 1) {
@@ -152,13 +174,14 @@ async function requestWakeLock() {
 function focusAt(clientX, clientY) {
   const { focusMode = [], pointsOfInterest } = state.caps;
   if (!state.track || (!focusMode.length && !pointsOfInterest)) return;
-  const r = video.getBoundingClientRect();
-  const scale = Math.min(r.width / video.videoWidth, r.height / video.videoHeight);
-  const w = video.videoWidth * scale, h = video.videoHeight * scale;
-  let x = (clientX - r.left - (r.width - w) / 2) / w;
-  const y = (clientY - r.top - (r.height - h) / 2) / h;
-  if (x < 0 || x > 1 || y < 0 || y > 1) return;
-  if (state.facingMode === 'user') x = 1 - x;
+  const r = $('frame').getBoundingClientRect();
+  let fx = (clientX - r.left) / r.width;
+  const fy = (clientY - r.top) / r.height;
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return;
+  if (state.facingMode === 'user') fx = 1 - fx;
+  const c0 = currentCrop();
+  const x = (c0.sx + fx * c0.sw) / video.videoWidth;
+  const y = (c0.sy + fy * c0.sh) / video.videoHeight;
 
   const c = { pointsOfInterest: [{ x, y }] };
   if (focusMode.includes('single-shot')) c.focusMode = 'single-shot';
@@ -204,17 +227,32 @@ async function takePhoto() {
   }
 }
 
+function currentCrop() {
+  return Hints.cropRect(video.videoWidth, video.videoHeight, state.ratio);
+}
+
+/** 依比例把預覽框縮放到觀景窗內（預覽範圍 = 實際拍到的範圍） */
+function layoutFrame() {
+  const vf = $('viewfinder'), frame = $('frame');
+  const { sw, sh } = currentCrop();
+  if (!sw || !sh) return;
+  const scale = Math.min(vf.clientWidth / sw, vf.clientHeight / sh);
+  frame.style.width = `${sw * scale}px`;
+  frame.style.height = `${sh * scale}px`;
+}
+
 function capture() {
+  const { sx, sy, sw, sh } = currentCrop();
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width = sw;
+  canvas.height = sh;
   const ctx = canvas.getContext('2d');
   ctx.filter = state.filter;
   if (state.facingMode === 'user') {
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
   }
-  ctx.drawImage(video, 0, 0);
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
   return new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
 }
 
@@ -283,6 +321,7 @@ function showView(name) {
   if (name === 'camera') { revokeUrls(); startCamera(); }
   else stopCamera();
   if (name === 'gallery') renderGallery();
+  if (name === 'tips') renderDeviceInfo();
 }
 
 /* ---------- 構圖提示 ---------- */
@@ -346,14 +385,16 @@ function updateHint() {
   el.classList.toggle('hidden', !active);
   if (!active) return;
 
-  lightCtx.drawImage(video, 0, 0, lightCanvas.width, lightCanvas.height);
+  const crop = currentCrop();
+  lightCtx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, lightCanvas.width, lightCanvas.height);
   const light = Hints.measureLight(lightCtx, lightCanvas.width, lightCanvas.height);
 
   let pose = null;
   if (poseDetector) {
     const ts = Math.max(performance.now(), lastPoseTs + 1);
     lastPoseTs = ts;
-    pose = poseDetector.detectForVideo(video, ts).landmarks?.[0] ?? null;
+    const lm = poseDetector.detectForVideo(video, ts).landmarks?.[0];
+    pose = lm ? Hints.mapPose(lm, video.videoWidth, video.videoHeight, crop) : null;
   }
 
   let hint = Hints.analyze({ light, motion: readMotion(), pose });
@@ -369,6 +410,21 @@ function updateHint() {
 
 /* ---------- 事件 ---------- */
 $('btn-shutter').onclick = takePhoto;
+$('btn-ratio').onclick = () => {
+  const opts = ratioOptions();
+  state.ratio = opts[(opts.indexOf(state.ratio) + 1) % opts.length];
+  updateRatioLabel();
+  layoutFrame();
+};
+for (const ev of ['loadedmetadata', 'resize']) {
+  video.addEventListener(ev, () => {
+    if (!ratioOptions().includes(state.ratio)) state.ratio = null;
+    updateRatioLabel();
+    layoutFrame();
+  });
+}
+addEventListener('resize', layoutFrame);
+
 $('btn-torch').onclick = (e) => {
   state.torch = !state.torch;
   applyAdvanced({ torch: state.torch });
@@ -379,7 +435,7 @@ $('btn-lens').onclick = () => {
   startCamera();
 };
 $('viewfinder').addEventListener('click', (e) => {
-  if (e.target === video) focusAt(e.clientX, e.clientY);
+  if (e.target === video || e.target === $('frame')) focusAt(e.clientX, e.clientY);
 });
 
 // 雙指縮放
@@ -410,7 +466,7 @@ $('btn-grid').onclick = (e) => {
 $('btn-timer').onclick = (e) => {
   const next = { 0: 3, 3: 10, 10: 0 }[state.timer];
   state.timer = next;
-  $('timer-label').textContent = next ? `${next}秒` : '關';
+  $('timer-label').textContent = next ? ` ${next}s` : '';
   e.currentTarget.classList.toggle('on', next > 0);
 };
 $('filters').onclick = (e) => {
@@ -427,7 +483,7 @@ $('btn-hints').onclick = (e) => {
 };
 $('btn-burst').onclick = (e) => {
   state.burst = !state.burst;
-  $('burst-label').textContent = state.burst ? '5張' : '關';
+  $('burst-label').textContent = state.burst ? '×5' : '';
   e.currentTarget.classList.toggle('on', state.burst);
 };
 $('btn-gallery').onclick = () => showView('gallery');
@@ -468,6 +524,31 @@ document.addEventListener('visibilitychange', () => {
   if ($('camera-view').classList.contains('hidden')) return;
   if (document.hidden) stopCamera(); else startCamera();
 });
+
+/* ---------- 相機資訊（協助針對機型調整） ---------- */
+async function renderDeviceInfo() {
+  const devices = await navigator.mediaDevices?.enumerateDevices().catch(() => []) ?? [];
+  const { settings } = state;
+  const info = {
+    userAgent: navigator.userAgent,
+    screen: `${screen.width}×${screen.height} @${devicePixelRatio}x`,
+    cameras: devices.filter((d) => d.kind === 'videoinput').map((d) => d.label || '(未授權)'),
+    current: { width: settings.width, height: settings.height, frameRate: settings.frameRate, facingMode: settings.facingMode },
+    zoom: state.caps.zoom ?? null,
+    torch: !!state.caps.torch,
+    focusMode: state.caps.focusMode ?? null,
+    poseDetector: poseStatus,
+  };
+  $('device-info').textContent = JSON.stringify(info, null, 2);
+}
+$('btn-copy-info').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($('device-info').textContent);
+    $('btn-copy-info').textContent = '已複製 ✓';
+  } catch {
+    $('btn-copy-info').textContent = '請手動選取複製';
+  }
+};
 
 /* ---------- 啟動 ---------- */
 startCamera();

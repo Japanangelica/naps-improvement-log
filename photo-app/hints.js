@@ -116,6 +116,28 @@ function pitchDownFromBeta(beta, portrait) {
   return 90 - beta;
 }
 
-const Hints = { analyze, describePose, measureLight, tiltFromGravity, pitchDownFromBeta, LM };
+/**
+ * 依畫面比例（寬/高，null = 原始）算出從影像中央裁切的範圍（像素）
+ */
+function cropRect(vw, vh, ratio) {
+  if (!ratio || !vw || !vh) return { sx: 0, sy: 0, sw: vw, sh: vh };
+  if (vw / vh > ratio) {
+    const sw = Math.round(vh * ratio);
+    return { sx: Math.round((vw - sw) / 2), sy: 0, sw, sh: vh };
+  }
+  const sh = Math.round(vw / ratio);
+  return { sx: 0, sy: Math.round((vh - sh) / 2), sw: vw, sh };
+}
+
+/** 把整張影像上的骨架座標，換算成裁切後畫面上的座標 */
+function mapPose(lm, vw, vh, crop) {
+  return lm.map((p) => ({
+    ...p,
+    x: (p.x * vw - crop.sx) / crop.sw,
+    y: (p.y * vh - crop.sy) / crop.sh,
+  }));
+}
+
+const Hints = { analyze, describePose, measureLight, tiltFromGravity, pitchDownFromBeta, cropRect, mapPose, LM };
 if (typeof module !== 'undefined') module.exports = Hints;
 else self.Hints = Hints;
