@@ -46,7 +46,11 @@ self.onmessage = async (e) => {
     const small = new OffscreenCanvas(Math.round(bitmap.width * k), Math.round(bitmap.height * k));
     small.getContext('2d').drawImage(bitmap, 0, 0, small.width, small.height);
     const lm = models.pose.detect(small).landmarks?.[0];
-    const info = { anchors: lm ? Retouch.poseAnchors(lm) : null, ...Beauty.analyze(bitmap, models) };
+    const info = {
+      anchors: lm ? Retouch.poseAnchors(lm) : null,
+      framing: lm ? Retouch.poseFraming(lm) : null,
+      ...Beauty.analyze(bitmap, models),
+    };
     bitmap.close();
     self.postMessage({ type: 'result', id, info });
   } catch (err) {

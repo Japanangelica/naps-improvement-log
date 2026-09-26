@@ -22,7 +22,58 @@ const FEATURES = {
 const NOSE_TIP = 1, CHIN = 152, CHEEK_L = 234, CHEEK_R = 454;
 
 /** 預設美化程度（0–100；長腿為 0–15 的百分比） */
-const DEFAULTS = { legs: 6, face: 25, waist: 15, skin: 30, blur: 20 };
+const DEFAULTS = { frame: 80, legs: 6, face: 25, waist: 15, skin: 30, blur: 20 };
+
+/* ---------- 構圖修正：自動裁掉太多的地板、天空 ---------- */
+
+const HEAD_ROOM = 0.1;   // 理想的頭頂留白（占裁切後高度）
+const FOOT_ROOM = 0.03;  // 理想的腳底留白
+const BODY_FILL = 0.8;   // 全身照中人物占畫面高度
+const MIN_KEEP = 0.55;   // 最多裁到原本高度的 55%，避免畫質掉太多
+
+/**
+ * 算出理想的裁切範圍（維持原本長寬比）。
+ * 全身：腳底貼近下緣、頭上留一點空間；半身：只裁掉頭上多餘的空間。
+ * @param {{headTop:number, feetY:number|null, centerX:number}} f 人物位置（0–1）
+ * @param {number} strength 0–1，0 = 不裁，1 = 完全照理想構圖
+ * @returns {{x,y,w,h}|null} 像素座標；差異太小時回傳 null
+ */
+function compositionCrop(f, W, H, strength = 1) {
+  if (!f || !(strength > 0)) return null;
+  const head = Math.max(0, f.headTop * H);
+  let top, bottom;
+  if (f.feetY != null) {
+    const feet = Math.min(H, f.feetY * H);
+    const hc = (feet - head) / BODY_FILL;
+    bottom = Math.min(H, feet + FOOT_ROOM * hc);
+    top = bottom - hc;
+  } else {
+    bottom = H;
+    top = head - HEAD_ROOM * ((H - head) / (1 - HEAD_ROOM));
+  }
+  top = Math.max(0, top);
+  const ideal = bottom - top;
+  let hc = Math.min(H, Math.max(ideal, H * MIN_KEEP));
+  // 寬度要容得下張開的手臂、腳（左右各留 3%），不夠就少裁一點
+  if (f.minX != null && f.maxX != null) {
+    const need = (f.maxX - f.minX) * W * 1.06;
+    if (hc * W / H < need) hc = Math.min(H, need * H / W);
+  }
+  const wc = hc * W / H;
+  // 受限於最小裁切高度而多出來的空間：全身照 60% 放頭上、40% 放腳下；半身照都放頭上
+  const extra = hc - ideal;
+  const idealY = f.feetY != null ? top - extra * 0.6 : bottom - hc;
+  const y = Math.max(0, Math.min(idealY, H - hc));
+  // 以身體為中心；若會切到手腳，改以手腳的中點為中心
+  let cx = f.centerX * W;
+  if (f.minX != null && (cx - wc / 2 > f.minX * W || cx + wc / 2 < f.maxX * W)) cx = ((f.minX + f.maxX) / 2) * W;
+  const x = Math.max(0, Math.min(cx - wc / 2, W - wc));
+  // 依強度在「原圖」與「理想構圖」之間內插
+  const lerp = (a, b) => a + (b - a) * strength;
+  const rect = { x: lerp(0, x), y: lerp(0, y), w: lerp(W, wc), h: lerp(H, hc) };
+  if (rect.h > H * 0.97) return null;
+  return rect;
+}
 
 /* ---------- 形狀調整（小臉、瘦腰）：逐列水平壓縮 ---------- */
 
@@ -327,12 +378,27 @@ function render(src, W, H, info = {}, p = DEFAULTS, { enhance = true } = {}) {
   if (fb && pct(p.face) > 0) img = warpBand(img, W, H, fb, pct(p.face));
   const wb = waistBand(info.anchors, W, H);
   if (wb && pct(p.waist) > 0) img = warpBand(img, W, H, wb, pct(p.waist));
-  return Retouch.render(img, W, H, { anchors: info.anchors, legs: (p.legs || 0) / 100, enhance });
+  const legs = (p.legs || 0) / 100;
+  const out = Retouch.render(img, W, H, { anchors: info.anchors, legs, enhance });
+
+  // 最後一步：構圖修正（裁切位置要換算長腿後的座標）
+  const rect = compositionCrop(info.framing, W, H, pct(p.frame));
+  if (!rect) return out;
+  const plan = Retouch.legPlan(info.anchors, H, legs);
+  const y0 = Math.max(0, Retouch.mapY(plan, rect.y));
+  const y1 = Math.min(out.height, Retouch.mapY(plan, rect.y + rect.h));
+  const ch = Math.max(1, y1 - y0);
+  const cw = Math.min(W, Math.round(ch * rect.w / rect.h));
+  const cx = Math.max(0, Math.min(rect.x + rect.w / 2 - cw / 2, W - cw));
+  const cropped = makeCanvas(cw, Math.round(ch));
+  cropped.getContext('2d').drawImage(out, cx, y0, cw, ch, 0, 0, cw, Math.round(ch));
+  return cropped;
 }
 
 /** 這張照片可以用哪些美化（沒偵測到臉就不能小臉，以此類推） */
 function available(info = {}) {
   return {
+    frame: !!info.framing,
     legs: !!info.anchors,
     waist: !!(info.anchors && info.anchors.shoulderY != null),
     face: !!info.face,
@@ -342,7 +408,7 @@ function available(info = {}) {
 }
 
 const Beauty = {
-  CAT, DEFAULTS, bump, remapRow, shrinkMask, bandScale, faceBand, waistBand,
+  CAT, DEFAULTS, compositionCrop, bump, remapRow, shrinkMask, bandScale, faceBand, waistBand,
   sharpness, scoreShot, pickBest, bestReason, analyze, render, available,
 };
 if (typeof module !== 'undefined') module.exports = Beauty;

@@ -63,3 +63,11 @@ test('偏暗的照片會提亮，太亮的不會過度壓暗', () => {
   assert.ok(b(enhanceFilter(120)) === 1);
   assert.ok(b(enhanceFilter(230)) >= 0.97);
 });
+
+test('長腿後座標換算：腰部以上只受頭頂裁切影響，腳底往下移', () => {
+  const { mapY } = require('../www/retouch.js');
+  const plan = legPlan({ hipY: 0.5, headTop: 0.2, ankleY: 0.89 }, 4000, 0.1);
+  assert.strictEqual(mapY(plan, 1000), 1000 - plan.cropTop);
+  assert.ok(Math.abs(mapY(plan, 3800) - (3800 + plan.added - plan.cropTop)) < 1);
+  assert.strictEqual(mapY(null, 1234), 1234);
+});

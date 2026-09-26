@@ -68,8 +68,8 @@ test('沒有臉時依清晰度與構圖選', () => {
 });
 
 test('依分析結果判斷可用的美化', () => {
-  assert.deepStrictEqual(B.available({}), { legs: false, waist: false, face: false, skin: false, blur: false });
-  const av = B.available({ anchors: { shoulderY: 0.3 }, face: new Float32Array(2), mask: {} });
+  assert.deepStrictEqual(B.available({}), { frame: false, legs: false, waist: false, face: false, skin: false, blur: false });
+  const av = B.available({ anchors: { shoulderY: 0.3 }, framing: {}, face: new Float32Array(2), mask: {} });
   assert.ok(Object.values(av).every(Boolean));
 });
 
@@ -79,4 +79,61 @@ test('分類遮罩縮小保留類別', () => {
   const m = B.shrinkMask(data, w, h, 4);
   assert.deepStrictEqual([m.w, m.h], [4, 2]);
   assert.deepStrictEqual([...m.data], [0, 0, 3, 3, 0, 0, 3, 3]);
+});
+
+test('構圖修正：全身照地板太多 → 裁掉地板，腳底貼近下緣', () => {
+  // 頭頂在 20%、腳底在 70%，下面 30% 都是地板
+  const r = B.compositionCrop({ headTop: 0.2, feetY: 0.7, centerX: 0.5 }, 3000, 4000, 1);
+  assert.ok(r);
+  const feetInCrop = (0.7 * 4000 - r.y) / r.h;
+  const headInCrop = (0.2 * 4000 - r.y) / r.h;
+  assert.ok(feetInCrop > 0.93 && feetInCrop < 1, `腳底在裁切後的 ${feetInCrop}`);
+  assert.ok(headInCrop > 0.05 && headInCrop < 0.2, `頭頂在裁切後的 ${headInCrop}`);
+  assert.ok(Math.abs(r.w / r.h - 3000 / 4000) < 1e-9); // 長寬比不變
+  assert.ok(r.h >= 4000 * 0.55);
+});
+
+test('構圖修正：人很小時（受限最小裁切）多的空間上下分配，地板與天空都減少', () => {
+  const r = B.compositionCrop({ headTop: 0.3, feetY: 0.65, centerX: 0.5 }, 3000, 4000, 1);
+  const feetInCrop = (0.65 * 4000 - r.y) / r.h;
+  const headInCrop = (0.3 * 4000 - r.y) / r.h;
+  assert.ok(Math.abs(r.h - 4000 * 0.55) < 1e-6);
+  assert.ok(feetInCrop > 0.85 && feetInCrop < 1);   // 原本 0.65
+  assert.ok(headInCrop > 0.15 && headInCrop < 0.3); // 原本 0.3
+});
+
+test('構圖修正：半身照天空太多 → 只裁上方', () => {
+  const r = B.compositionCrop({ headTop: 0.45, feetY: null, centerX: 0.5 }, 3000, 4000, 1);
+  assert.ok(r);
+  assert.ok(Math.abs(r.y + r.h - 4000) < 1e-6); // 下緣不動
+  const headInCrop = (0.45 * 4000 - r.y) / r.h;
+  assert.ok(headInCrop < 0.2);
+});
+
+test('構圖修正：人物偏一邊時裁切框跟著人，但不超出照片', () => {
+  const r = B.compositionCrop({ headTop: 0.3, feetY: 0.65, centerX: 0.95 }, 3000, 4000, 1);
+  assert.ok(r.x + r.w <= 3000 + 1e-6);
+  assert.ok(r.x > 0);
+});
+
+test('構圖修正：本來就好、或強度 0 時不裁', () => {
+  assert.strictEqual(B.compositionCrop({ headTop: 0.08, feetY: 0.96, centerX: 0.5 }, 3000, 4000, 1), null);
+  assert.strictEqual(B.compositionCrop({ headTop: 0.3, feetY: 0.65, centerX: 0.5 }, 3000, 4000, 0), null);
+  assert.strictEqual(B.compositionCrop(null, 3000, 4000, 1), null);
+});
+
+test('構圖修正強度 50% 介於原圖與理想之間', () => {
+  const full = B.compositionCrop({ headTop: 0.3, feetY: 0.65, centerX: 0.5 }, 3000, 4000, 1);
+  const half = B.compositionCrop({ headTop: 0.3, feetY: 0.65, centerX: 0.5 }, 3000, 4000, 0.5);
+  assert.ok(half.h > full.h && half.h < 4000);
+});
+
+test('構圖修正不會切到張開的手臂', () => {
+  const f = { headTop: 0.36, feetY: 0.94, centerX: 0.48, minX: 0.02, maxX: 0.98 };
+  const r = B.compositionCrop(f, 3000, 4000, 1);
+  if (r) {
+    assert.ok(r.x <= 0.02 * 3000 + 1 && r.x + r.w >= 0.98 * 3000 - 1, '手臂要在框內');
+  }
+  const narrow = B.compositionCrop({ ...f, minX: 0.35, maxX: 0.65 }, 3000, 4000, 1);
+  assert.ok(narrow && narrow.h < 4000 * 0.9); // 手沒張開時照常裁
 });

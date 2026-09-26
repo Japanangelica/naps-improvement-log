@@ -48,11 +48,11 @@ test('腳底離下緣太遠', () => {
 });
 
 test('頭頂留白太多', () => {
-  assert.match(analyze({ light: goodLight, pose: person({ headTop: 0.5, feetY: 0.97 }) }).text, /頭頂上方空太多/);
+  assert.match(analyze({ light: goodLight, pose: person({ headTop: 0.5, feetY: 0.97 }) }).text, /天空太多/);
 });
 
 test('人太小', () => {
-  assert.match(analyze({ light: goodLight, pose: person({ headTop: 0.7, feetY: 0.95 }) }).text, /頭頂上方空太多|人太小/);
+  assert.match(analyze({ light: goodLight, pose: person({ headTop: 0.7, feetY: 0.95 }) }).text, /天空太多|人太小/);
   assert.match(analyze({ light: goodLight, pose: person({ headTop: 0.35, feetY: 0.6 }).map((p, i) => i >= 25 ? { ...p, visibility: 0 } : p) }).text, /人太小/);
 });
 

@@ -12,6 +12,7 @@ const BONES = [
   [23, 25], [25, 27], [27, 31], [24, 26], [26, 28], [28, 32],
 ];
 const FOOT_LINE = 0.97;   // 腳底目標線（畫面高度的比例）
+const HEAD_LINE = 0.1;    // 頭頂目標線
 
 /** 依提示代碼決定畫面上的方向提示：{dir: 'down'|'up'|'in'|'level', text} */
 function cueFor(code) {
@@ -110,6 +111,28 @@ function draw(canvas, { lm, mirror, hint, roll }) {
     ctx.restore();
   }
 
+  // 頭頂目標線：有偵測到人時顯示，頭頂在 4%～18% 之間就變綠
+  if (body) {
+    const good = body.headTop >= 0.04 && body.headTop <= 0.18;
+    const y = HEAD_LINE * h;
+    ctx.save();
+    ctx.setLineDash([6, 8]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = good ? COLORS.ok : 'rgba(255,255,255,.7)';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.25, y);
+    ctx.lineTo(w * 0.75, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = good ? COLORS.ok : '#fff';
+    ctx.shadowColor = 'rgba(0,0,0,.7)';
+    ctx.shadowBlur = 4;
+    ctx.fillText(good ? '頭頂位置剛好 ✓' : '頭頂放在這條線附近', w / 2, y + 16);
+    ctx.restore();
+  }
+
   // 人物骨架
   if (lm) {
     ctx.save();
@@ -161,6 +184,6 @@ function draw(canvas, { lm, mirror, hint, roll }) {
   }
 }
 
-const Guide = { cueFor, Stability, draw, FOOT_LINE };
+const Guide = { cueFor, Stability, draw, FOOT_LINE, HEAD_LINE };
 if (typeof module !== 'undefined') module.exports = Guide;
 else self.Guide = Guide;

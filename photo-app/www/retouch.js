@@ -49,6 +49,41 @@ function poseAnchors(lm, visible = 0.5) {
   };
 }
 
+/**
+ * 構圖用的人物位置（半身也可以）：頭頂、腳底（看不到為 null）、身體中心 x。
+ */
+function poseFraming(lm, visible = 0.5) {
+  if (!lm) return null;
+  const ok = (i) => lm[i] && lm[i].visibility >= visible && lm[i].y >= -0.05 && lm[i].y <= 1.02;
+  if (!ok(0) || !(ok(11) || ok(12))) return null;
+  const eyeY = (lm[2].y + lm[5].y) / 2;
+  const mouthY = (lm[9].y + lm[10].y) / 2;
+  const headTop = eyeY - Math.max(mouthY - eyeY, 0.01) * 1.6;
+  const feet = [27, 28, 29, 30, 31, 32].filter(ok).map((i) => lm[i].y);
+  const body = [0, 11, 12, 23, 24].filter(ok).map((i) => lm[i].x);
+  // 左右最外側（手指、手腕、手肘、肩膀、腳），裁切時不要切到
+  const xs = [11, 12, 13, 14, 15, 16, 19, 20, 27, 28, 31, 32].filter(ok).map((i) => lm[i].x);
+  return {
+    headTop,
+    feetY: [27, 28].some(ok) ? Math.max(...feet) : null,
+    centerX: body.reduce((a, b) => a + b, 0) / body.length,
+    minX: Math.max(0, Math.min(...xs)),
+    maxX: Math.min(1, Math.max(...xs)),
+  };
+}
+
+/** 長腿後，原圖第 y 列會移到哪裡（構圖裁切要跟著換算） */
+function mapY(plan, y) {
+  if (!plan) return y;
+  if (y <= plan.hip) return y - plan.cropTop;
+  let out = plan.hip - plan.cropTop;
+  const rows = y - plan.hip;
+  for (let i = 0; i < Math.min(rows, plan.lower); i++) {
+    out += i < plan.span ? rowScale((i + 0.5) / plan.span, plan.amount) : 1;
+  }
+  return out;
+}
+
 function profile(u) {
   return smoothstep(u / RAMP_UP) * smoothstep((1 - u) / RAMP_DOWN);
 }
@@ -84,7 +119,7 @@ function legPlan(anchors, H, amount) {
   added = Math.round(added);
   const spare = Math.round((headTop - MIN_HEADROOM) * H);
   const cropTop = spare >= added ? added : Math.max(0, spare);
-  return { hip, lower, span, added, cropTop, outH: H + added - cropTop };
+  return { hip, lower, span, added, cropTop, amount, outH: H + added - cropTop };
 }
 
 /** 依畫面平均亮度決定美化濾鏡：偏暗就提亮，並稍微加強對比與飽和度 */
@@ -133,6 +168,6 @@ function render(src, W, H, { anchors, legs = 0, enhance = true } = {}) {
   return out;
 }
 
-const Retouch = { poseAnchors, rowScale, legPlan, enhanceFilter, render };
+const Retouch = { poseAnchors, poseFraming, mapY, rowScale, legPlan, enhanceFilter, render };
 if (typeof module !== 'undefined') module.exports = Retouch;
 else Object.assign(self, { Retouch, makeCanvas });

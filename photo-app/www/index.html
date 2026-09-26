@@ -71,7 +71,7 @@
     </div>
     <label class="row"><span><b>構圖提示與導引</b><small>骨架、腳底目標線、方向箭頭</small></span><input type="checkbox" class="switch" id="set-hints" checked></label>
     <label class="row"><span><b>九宮格線</b><small>幫助對齊水平與構圖</small></span><input type="checkbox" class="switch" id="set-grid"></label>
-    <label class="row"><span><b>自動美化</b><small>長腿、瘦腰、小臉、美肌、背景虛化；程度會記住你在相簿最後的調整</small></span><input type="checkbox" class="switch" id="set-beautify" checked></label>
+    <label class="row"><span><b>自動美化</b><small>構圖修正（裁掉太多的地板、天空）、長腿、瘦腰、小臉、美肌、背景虛化；程度會記住你在相簿最後的調整</small></span><input type="checkbox" class="switch" id="set-beautify" checked></label>
     <button class="row link" id="btn-beauty-reset"><span><b>美化程度恢復預設</b><small id="beauty-summary"></small></span><span class="chev">↺</span></button>
     <label class="row" id="row-autosave"><span><b>自動存到手機相簿</b><small>三星相簿裡的「拍照App」相簿</small></span><input type="checkbox" class="switch" id="set-autosave" checked></label>
     <button class="row link" id="btn-tips"><span><b>拍照教學</b><small>怎麼拍出好看的照片</small></span><span class="chev">›</span></button>
@@ -201,6 +201,7 @@
         <button type="button" id="btn-show-after" class="active">✨ 美化</button>
       </div>
       <div class="beauty-tabs" id="beauty-tabs" role="tablist" aria-label="美化項目">
+        <button type="button" role="tab" data-key="frame">構圖</button>
         <button type="button" role="tab" data-key="legs">長腿</button>
         <button type="button" role="tab" data-key="waist">瘦腰</button>
         <button type="button" role="tab" data-key="face">小臉</button>

@@ -77,7 +77,9 @@ function analyze({ light, motion, pose } = {}) {
     if (p.feetVisible && p.feetY < 0.85) {
       add(6, 'tip', 'feet-far', '腳底離畫面下緣太遠：讓腳底貼近下緣，腿看起來更長');
     }
-    if (p.feetVisible && p.headTop > 0.4) add(7, 'tip', 'headroom', '頭頂上方空太多：手機往下壓一點，或走近一點');
+    // 頭頂上方理想留白約 5～15%；太多就是「天空太廣」
+    if (p.feetVisible && p.headTop > 0.22) add(7, 'tip', 'headroom', '頭上天空太多：手機往下壓一點，讓頭頂靠近上方的線');
+    if (!p.feetVisible && p.height >= 0.3 && p.headTop > 0.2) add(7, 'tip', 'headroom', '頭上空太多：手機往下壓一點，或走近一點');
     if (p.height < 0.3) add(9, 'tip', 'small', '人太小了：走近一點，讓她占畫面多一點');
   }
 

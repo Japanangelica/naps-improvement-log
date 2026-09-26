@@ -594,15 +594,16 @@ function stepViewer(dir) {
 
 /* ---------- 美化面板：原圖／美化對照、長腿程度 ---------- */
 /* 美化面板：選一個項目、用滑桿調整；舊版照片（只有長腿）也相容 */
-const BEAUTY_LABEL = { legs: '長腿', waist: '瘦腰', face: '小臉', skin: '美肌', blur: '背景虛化' };
+const BEAUTY_LABEL = { frame: '構圖', legs: '長腿', waist: '瘦腰', face: '小臉', skin: '美肌', blur: '背景虛化' };
 const BEAUTY_WHY = {
+  frame: '這張沒偵測到人物的頭和身體',
   legs: '這張沒拍到完整的腰和腳',
   waist: '這張沒拍到完整的肩膀和腰',
   face: '這張沒偵測到臉',
   skin: '這張沒有人物分割資料',
   blur: '這張沒有人物分割資料',
 };
-let beautyKey = 'legs';
+let beautyKey = 'frame';
 
 function photoInfo(photo) {
   if (photo.info) return photo.info;
@@ -610,7 +611,7 @@ function photoInfo(photo) {
 }
 function photoBeauty(photo) {
   if (photo.beauty) return photo.beauty;
-  return { legs: Math.round((photo.retouch?.legs ?? 0) * 100), waist: 0, face: 0, skin: 0, blur: 0 };
+  return { frame: 0, legs: Math.round((photo.retouch?.legs ?? 0) * 100), waist: 0, face: 0, skin: 0, blur: 0 };
 }
 
 function setupRetouchPanel(photo) {
@@ -619,7 +620,7 @@ function setupRetouchPanel(photo) {
   if (!has) return;
   const av = Beauty.available(photoInfo(photo));
   document.querySelectorAll('#beauty-tabs button').forEach((b) => { b.disabled = !av[b.dataset.key]; });
-  if (!av[beautyKey]) beautyKey = Object.keys(BEAUTY_LABEL).find((k) => av[k]) || 'legs';
+  if (!av[beautyKey]) beautyKey = Object.keys(BEAUTY_LABEL).find((k) => av[k]) || 'frame';
   selectBeauty(beautyKey);
   showBefore(false);
 }
@@ -790,13 +791,17 @@ async function analyzePhoto(canvas) {
     } catch (err) { console.warn('背景分析失敗，改在主畫面分析', err); }
   }
   await waitForPause();
-  let anchors = null;
-  try { anchors = Retouch.poseAnchors(detectPose(canvas, 0, 0, canvas.width, canvas.height)); } catch (err) { console.warn(err); }
+  let anchors = null, framing = null;
+  try {
+    const lm = detectPose(canvas, 0, 0, canvas.width, canvas.height);
+    anchors = Retouch.poseAnchors(lm);
+    framing = Retouch.poseFraming(lm);
+  } catch (err) { console.warn(err); }
   await waitForPause();
   const faceInfo = Beauty.analyze(canvas, { face: beautyModels.face });
   await waitForPause();
   const segInfo = Beauty.analyze(canvas, { segmenter: beautyModels.segmenter }, { sharpness: false });
-  return { anchors, ...faceInfo, mask: segInfo.mask };
+  return { anchors, framing, ...faceInfo, mask: segInfo.mask };
 }
 
 async function loadBeautyModels({ FaceLandmarker, ImageSegmenter }, fileset) {
@@ -1016,7 +1021,7 @@ function applySettings() {
   $('set-grid').checked = settings.grid;
   $('set-beautify').checked = settings.beauty.on;
   const b = settings.beauty;
-  $('beauty-summary').textContent = `目前：長腿 +${b.legs}%、瘦腰 ${b.waist}、小臉 ${b.face}、美肌 ${b.skin}、虛化 ${b.blur}`;
+  $('beauty-summary').textContent = `目前：構圖 ${b.frame}、長腿 +${b.legs}%、瘦腰 ${b.waist}、小臉 ${b.face}、美肌 ${b.skin}、虛化 ${b.blur}`;
   $('set-autosave').checked = settings.autosave;
   $('row-autosave').classList.toggle('hidden', !isNative);
   if (!settings.hints && state.auto) setMode('photo');
