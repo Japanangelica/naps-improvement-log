@@ -40,7 +40,9 @@ function colorFor(name) {
   return AVATARS[n % AVATARS.length];
 }
 const initial = (name) => ([...name.trim()][0] || '?').toUpperCase();
-const avatar = (name) => h('div', { class: 'avatar', style: `background:${colorFor(name)}` }, initial(name));
+const avatar = (name, color) => h('div', { class: 'avatar', style: `background:${color || colorFor(name)}` }, initial(name));
+const catTag = (cat) => h('span', { class: 'tag', style: `--cc:${cat.color}` }, h('i'), cat.name, cat.secret && ico('lock'));
+const catOf = (rec) => vault.categoryOf(rec.category);
 
 function show(el) {
   app.replaceChildren(el);
@@ -61,17 +63,35 @@ function passwordField(label, props = {}) {
 function dialog({ title, text, body, confirm = '確定', cancel = '取消', danger = false }) {
   return new Promise((resolve) => {
     const done = (v) => { scrim.remove(); resolve(v); };
+    const okBtn = h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => done(true) }, confirm);
     const scrim = h(
       'div', { class: 'scrim', onclick: (e) => e.target === scrim && done(false) },
       h('div', { class: 'dialog' },
         h('h4', {}, title), text && h('p', {}, text), body,
         h('div', { class: 'btns' },
           cancel && h('button', { class: 'btn ghost', onclick: () => done(false) }, cancel),
-          h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => done(true) }, confirm))),
+          okBtn)),
     );
+    scrim.addEventListener('keydown', (e) => e.key === 'Enter' && e.target.tagName === 'INPUT' && okBtn.click());
     document.body.append(scrim);
     scrim.querySelector('input')?.focus();
   });
+}
+
+function textField(label, props = {}) {
+  const input = h('input', { autocomplete: 'off', ...props });
+  return { root: h('div', { class: 'field' }, h('label', {}, label), h('div', { class: 'input-wrap' }, input)), input };
+}
+
+// 機密分類:查看、複製、編輯密碼前需再驗證主密碼,通過後 60 秒內免再輸入
+let secretOkUntil = 0;
+async function guardSecret(rec) {
+  if (!vault.isSecret(rec) || Date.now() < secretOkUntil) return true;
+  const pw = passwordField('主密碼');
+  if (!(await dialog({ title: '機密資料', text: '此分類為機密,請再次輸入主密碼確認。', body: pw.root, confirm: '驗證' }))) return false;
+  if (!(await vault.verifyPassword(pw.input.value))) { toast('主密碼錯誤'); return false; }
+  secretOkUntil = Date.now() + 60000;
+  return true;
 }
 
 const sheets = [];
@@ -111,6 +131,7 @@ document.addEventListener('visibilitychange', () => {
 });
 function lockNow() {
   clearTimeout(idleTimer);
+  secretOkUntil = 0;
   vault.lock();
   closeAllSheets();
   renderLock();
@@ -195,6 +216,7 @@ function afterUnlock() {
 
 /* ---------- 清單 ---------- */
 let query = '';
+let catFilter = 'all';
 function norm(s) {
   return (s || '').normalize('NFKC').toLowerCase();
 }
@@ -204,25 +226,35 @@ function renderList() {
   const clear = h('button', { class: 'clear', 'aria-label': '清除' }, ico('x'));
   const list = h('div', { class: 'list' });
   const count = h('div', { class: 'sub' });
+  const chips = h('div', { class: 'chips' });
 
   const paint = () => {
     const q = norm(query.trim());
-    const all = vault.list().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    const everything = vault.list().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    const cats = vault.categories();
+    if (catFilter !== 'all' && !cats.some((c) => c.id === catFilter)) catFilter = 'all';
+    const countOf = (id) => everything.filter((r) => catOf(r).id === id).length;
+    chips.replaceChildren(
+      h('button', { class: `chip${catFilter === 'all' ? ' on' : ''}`, onclick: () => { catFilter = 'all'; paint(); } }, '全部', h('small', {}, everything.length)),
+      ...cats.map((c) =>
+        h('button', { class: `chip${catFilter === c.id ? ' on' : ''}`, onclick: () => { catFilter = c.id; paint(); } },
+          h('i', { class: 'dot', style: `background:${c.color}` }), c.name, h('small', {}, countOf(c.id)))));
+    const all = catFilter === 'all' ? everything : everything.filter((r) => catOf(r).id === catFilter);
     const rows = q ? all.filter((r) => norm(`${r.name}\n${r.account}\n${r.note}`).includes(q)) : all;
-    count.textContent = q ? `找到 ${rows.length} / ${all.length} 筆` : `共 ${all.length} 筆記錄`;
+    count.textContent = q || catFilter !== 'all' ? `找到 ${rows.length} / ${everything.length} 筆` : `共 ${everything.length} 筆記錄`;
     clear.style.display = query ? '' : 'none';
     list.replaceChildren();
     if (!rows.length) {
       list.append(h('div', { class: 'empty' },
-        h('div', { class: 'art' }, ico(all.length ? 'search' : 'key')),
-        all.length ? h('b', {}, '找不到符合的記錄') : h('b', {}, '還沒有任何記錄'),
-        all.length ? '換個關鍵字試試看' : '點右下角「＋」新增第一筆帳號密碼'));
+        h('div', { class: 'art' }, ico(everything.length ? 'search' : 'key')),
+        everything.length ? h('b', {}, '找不到符合的記錄') : h('b', {}, '還沒有任何記錄'),
+        everything.length ? '換個關鍵字或分類試試看' : '點右下角「＋」新增第一筆帳號密碼'));
       return;
     }
     rows.forEach((r, i) => {
       const card = h('button', { class: 'card', style: `animation-delay:${Math.min(i, 8) * 30}ms`, onclick: () => openDetail(r.id) },
-        avatar(r.name),
-        h('div', { class: 'meta' }, h('div', { class: 'name' }, r.name), h('div', { class: 'acct' }, r.account || '—')),
+        avatar(r.name, catOf(r).color),
+        h('div', { class: 'meta' }, h('div', { class: 'name' }, r.name), h('div', { class: 'acct' }, r.account || '—'), catTag(catOf(r))),
         ico('chevron'));
       list.append(card);
     });
@@ -237,7 +269,8 @@ function renderList() {
         h('div', { class: 'actions' },
           h('button', { class: 'round', 'aria-label': '設定', onclick: openSettings }, ico('sliders')),
           h('button', { class: 'round', 'aria-label': '立即上鎖', onclick: lockNow }, ico('lock')))),
-      h('div', { class: 'search' }, ico('search'), search, clear)),
+      h('div', { class: 'search' }, ico('search'), search, clear),
+      chips),
     list,
     h('button', { class: 'fab', 'aria-label': '新增', onclick: () => openEditor() }, ico('plus')));
   show(screen);
@@ -248,8 +281,9 @@ function renderList() {
 const refreshList = () => renderList.current && renderList.current();
 
 /* ---------- 詳細 ---------- */
-function copyItem(label, value) {
+function copyItem(label, value, rec) {
   return async () => {
+    if (rec && !(await guardSecret(rec))) return;
     try {
       await native.copyText(value, getSettings().clipClear ? CLIP_MS : 0);
       toast(getSettings().clipClear ? `已複製${label},30 秒後自動清除` : `已複製${label}`);
@@ -265,7 +299,8 @@ function openDetail(id) {
     let shown = false;
     const pwVal = h('div', { class: 'val mono' }, '••••••••••');
     const eye = h('button', { class: 'ib', 'aria-label': '顯示密碼' }, ico('eye'));
-    eye.onclick = () => {
+    eye.onclick = async () => {
+      if (!shown && !(await guardSecret(rec))) return;
       shown = !shown;
       pwVal.textContent = shown ? rec.password : '••••••••••';
       eye.replaceChildren(ico(shown ? 'eyeOff' : 'eye'));
@@ -275,13 +310,13 @@ function openDetail(id) {
       h('div', { class: 'bar' },
         h('button', { class: 'ib', 'aria-label': '返回', onclick: sheet.close }, ico('back')),
         h('h2', {}, '詳細資料'),
-        h('button', { class: 'ib', 'aria-label': '編輯', onclick: () => { sheet.close(); openEditor(id); } }, ico('edit'))),
+        h('button', { class: 'ib', 'aria-label': '編輯', onclick: async () => { if (await guardSecret(rec)) { sheet.close(); openEditor(id); } } }, ico('edit'))),
       h('div', { class: 'body' },
-        h('div', { class: 'id-head' }, avatar(rec.name), h('h3', {}, rec.name)),
+        h('div', { class: 'id-head' }, avatar(rec.name, catOf(rec).color), h('h3', {}, rec.name), catTag(catOf(rec))),
         h('div', { class: 'group' },
           row('帳號', h('div', { class: 'val' }, rec.account || '—'),
             rec.account && h('button', { class: 'ib', 'aria-label': '複製帳號', onclick: copyItem('帳號', rec.account) }, ico('copy'))),
-          row('密碼', pwVal, [eye, h('button', { class: 'ib', 'aria-label': '複製密碼', onclick: copyItem('密碼', rec.password) }, ico('copy'))])),
+          row('密碼', pwVal, [eye, h('button', { class: 'ib', 'aria-label': '複製密碼', onclick: copyItem('密碼', rec.password, rec) }, ico('copy'))])),
         rec.note && h('div', { class: 'group' }, row('備註', h('div', { class: 'val note' }, rec.note))),
         h('div', { class: 'hint', style: 'text-align:center' }, `更新於 ${new Date(rec.updatedAt).toLocaleString('zh-TW')}`),
         h('button', {
@@ -313,8 +348,14 @@ function genPassword(len = 16) {
 }
 
 function openEditor(id) {
-  const rec = id ? vault.get(id) : { name: '', account: '', password: '', note: '' };
+  const rec = id ? vault.get(id) : { name: '', account: '', password: '', note: '', category: catFilter === 'all' ? vault.OTHER : catFilter };
   openSheet((el, sheet) => {
+    let cat = vault.categoryOf(rec.category).id;
+    const picker = h('div', { class: 'cat-pick' });
+    const paintCats = () => picker.replaceChildren(...vault.categories().map((c) =>
+      h('button', { type: 'button', class: `chip${cat === c.id ? ' on' : ''}`, style: `--cc:${c.color}`, onclick: () => { cat = c.id; paintCats(); } },
+        h('i', { class: 'dot', style: `background:${c.color}` }), c.name, c.secret && ico('lock'))));
+    paintCats();
     const name = h('input', { placeholder: '例如:Gmail、蝦皮、公司系統', value: rec.name, maxlength: 80 });
     const account = h('input', { placeholder: '帳號或 Email', value: rec.account, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', maxlength: 200 });
     const pw = passwordField('密碼', { value: rec.password, maxlength: 500 });
@@ -331,7 +372,7 @@ function openEditor(id) {
       if (!name.value.trim()) return (err.textContent = '請輸入名稱');
       if (!pw.input.value) return (err.textContent = '請輸入密碼');
       saveBtn.disabled = true;
-      await vault.save({ id, name: name.value.trim(), account: account.value.trim(), password: pw.input.value, note: note.value.trim() });
+      await vault.save({ id, name: name.value.trim(), account: account.value.trim(), password: pw.input.value, note: note.value.trim(), category: cat });
       sheet.close();
       refreshList();
       toast('已儲存');
@@ -340,7 +381,9 @@ function openEditor(id) {
       h('div', { class: 'bar' },
         h('button', { class: 'ib', 'aria-label': '取消', onclick: sheet.close }, ico('x')),
         h('h2', {}, id ? '編輯記錄' : '新增記錄')),
-      h('div', { class: 'body' }, field('名稱', name), field('帳號', account), pw.root, field('備註', note), err, saveBtn));
+      h('div', { class: 'body' },
+        h('div', { class: 'field' }, h('label', {}, '分類'), picker),
+        field('名稱', name), field('帳號', account), pw.root, field('備註', note), err, saveBtn));
     if (!id) setTimeout(() => name.focus(), 300);
   });
 }
@@ -383,6 +426,9 @@ function openSettings() {
           }),
           rowEl('copy', '複製後 30 秒清除剪貼簿', null, toggle(s.clipClear), () => { setSettings({ clipClear: !s.clipClear }); paint(); }),
           rowEl('key', '變更主密碼', null, ico('chevron'), changePw)),
+        h('div', { class: 'sec-title' }, '分類'),
+        h('div', { class: 'group' },
+          rowEl('sliders', '管理分類', '新增、改名、設為機密或刪除', ico('chevron'), openCategories)),
         h('div', { class: 'sec-title' }, '備份'),
         h('div', { class: 'group' },
           rowEl('download', '匯出加密備份', '以目前主密碼加密,可存到雲端或傳給自己', ico('chevron'), doExport),
@@ -392,6 +438,59 @@ function openSettings() {
     el.append(
       h('div', { class: 'bar' }, h('button', { class: 'ib', 'aria-label': '返回', onclick: sheet.close }, ico('back')), h('h2', {}, '設定')),
       body);
+    paint();
+  });
+}
+
+function openCategories() {
+  openSheet((el, sheet) => {
+    const body = h('div', { class: 'body' });
+    const paint = () => {
+      const rows = vault.categories().map((c) => {
+        const sw = h('div', { class: `sw${c.secret ? ' on' : ''}` });
+        return h('div', { class: 'item' },
+          h('i', { class: 'dot big', style: `background:${c.color}` }),
+          h('button', {
+            class: 'txt cat-name',
+            onclick: async () => {
+              const f = textField('分類名稱', { value: c.name, maxlength: 12 });
+              if (!(await dialog({ title: '重新命名', body: f.root, confirm: '儲存' })) || !f.input.value.trim()) return;
+              await vault.saveCategories(vault.categories().map((x) => (x.id === c.id ? { ...x, name: f.input.value.trim() } : x)));
+              paint(); refreshList();
+            },
+          }, h('div', { class: 'val' }, c.name), h('div', { class: 'lbl' }, `${vault.list().filter((r) => catOf(r).id === c.id).length} 筆`)),
+          h('button', {
+            class: 'ib sw-btn', 'aria-label': '機密',
+            onclick: async () => {
+              await vault.saveCategories(vault.categories().map((x) => (x.id === c.id ? { ...x, secret: !x.secret } : x)));
+              paint(); refreshList();
+            },
+          }, h('span', { class: 'lbl' }, '機密'), sw),
+          c.id !== vault.OTHER && h('button', {
+            class: 'ib', 'aria-label': '刪除分類',
+            onclick: async () => {
+              if (!(await dialog({ title: `刪除「${c.name}」?`, text: '此分類下的記錄會移到「其他」。', confirm: '刪除', danger: true }))) return;
+              await vault.removeCategory(c.id);
+              paint(); refreshList();
+            },
+          }, ico('trash')));
+      });
+      body.replaceChildren(
+        h('div', { class: 'hint' }, '「機密」分類在查看、複製、編輯密碼前,需要再次輸入主密碼。'),
+        h('div', { class: 'group' }, rows),
+        h('button', {
+          class: 'btn primary',
+          onclick: async () => {
+            const f = textField('分類名稱', { placeholder: '例如:保險、學校', maxlength: 12 });
+            const sec = h('input', { type: 'checkbox' });
+            const box = h('div', { style: 'display:flex;flex-direction:column;gap:12px' }, f.root, h('label', { class: 'check' }, sec, '設為機密(查看密碼需再驗證)'));
+            if (!(await dialog({ title: '新增分類', body: box, confirm: '新增' })) || !f.input.value.trim()) return;
+            await vault.addCategory(f.input.value.trim(), sec.checked);
+            paint(); refreshList();
+          },
+        }, ico('plus'), '新增分類'));
+    };
+    el.append(h('div', { class: 'bar' }, h('button', { class: 'ib', 'aria-label': '返回', onclick: sheet.close }, ico('back')), h('h2', {}, '管理分類')), body);
     paint();
   });
 }

@@ -155,3 +155,23 @@ select { border: 0; background: var(--surface-2); color: var(--text); border-rad
 .dialog .btns .btn { flex: 1; height: 46px; }
 .toast { position: fixed; left: 50%; bottom: calc(var(--sab) + 110px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 11px 20px; border-radius: 999px; font-size: 14px; z-index: 60; box-shadow: var(--shadow); animation: toast 2.2s ease forwards; white-space: nowrap; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; }
 @keyframes toast { 0% { opacity: 0; transform: translate(-50%, 10px); } 10%, 85% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; } }
+
+/* ---------- 分類 ---------- */
+.chips { display: flex; gap: 8px; overflow-x: auto; margin: 14px -20px 0; padding: 0 20px 2px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 14px; white-space: nowrap; transition: background .15s; }
+.chip small { opacity: .75; font-size: 12px; }
+.chip svg { width: 13px; height: 13px; }
+.chip.on { background: #fff; color: #26325e; font-weight: 700; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.big { width: 14px; height: 14px; margin-left: 2px; }
+.cat-pick { display: flex; flex-wrap: wrap; gap: 8px; }
+.cat-pick .chip { background: var(--surface); color: var(--text); border: 1.5px solid var(--line); }
+.cat-pick .chip.on { background: var(--cc); border-color: var(--cc); color: #fff; }
+.cat-pick .chip.on .dot { background: #fff !important; }
+.tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.tag i { width: 8px; height: 8px; border-radius: 50%; background: var(--cc); display: inline-block; }
+.tag svg { width: 12px; height: 12px; }
+.item .cat-name { text-align: left; }
+.item .sw-btn { width: auto; border-radius: 14px; padding: 0 8px; gap: 8px; display: flex; align-items: center; }
+.item .sw-btn .lbl { color: var(--muted); }
