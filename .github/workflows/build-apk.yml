@@ -1,0 +1,46 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, ccr-d0281232-4d9xuo]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app and sync to Android
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Build signed APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk aihi.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aihi-apk
+          path: aihi.apk
+          if-no-files-found: error

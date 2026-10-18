@@ -1,0 +1,6 @@
+{
+  "appId": "app.aihi.vault",
+  "appName": "藍緋",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false }
+}
