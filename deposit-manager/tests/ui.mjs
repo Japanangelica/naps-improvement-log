@@ -104,8 +104,12 @@ try {
   await page.waitForSelector('#sheet tbody tr');
   assert.equal(await page.locator('#sheet tbody tr').count(), 4);
   assert.equal(await page.locator('[data-act="tab"][data-v="home"]').count(), 0);
-  await page.check(`[data-post="${orderNo}"]`);
-  await page.waitForSelector('#toast:has-text("已標記轉記")');
+  await page.check(`[data-post="${orderNo}"][data-flag="posted"]`);
+  await page.waitForSelector('#toast:has-text("已勾選轉記")');
+  await page.check(`[data-post="${orderNo}"][data-flag="reviewed"]`);
+  await page.waitForSelector('#toast:has-text("已勾選會計確認")');
+  await page.selectOption('#tStatus', 'unreviewed'); await act('tableLoad');
+  await page.waitForFunction(() => document.querySelectorAll('#sheet tbody tr').length === 3);
   await page.selectOption('#tStatus', 'unposted'); await act('tableLoad');
   await page.waitForFunction(() => document.querySelectorAll('#sheet tbody tr').length === 3);
   await page.selectOption('#tStatus', 'all'); await act('tableLoad');
@@ -114,8 +118,8 @@ try {
   assert.equal(await page.locator('#sheet tbody tr').count(), 1);
   await page.fill('#tq', '');
   await shot('10-sheet');
-  await page.click(`#sheet tr[data-no="${orderNo}"] td:nth-child(3)`);
-  await page.waitForSelector('[data-act="posted"]');
+  await page.click(`#sheet tr[data-no="${orderNo}"] td:nth-child(4)`);
+  await page.waitForSelector('[data-act="flag"]');
   assert.equal(await page.locator('[data-act="mClose"], [data-act="mPay"], [data-act="mVoid"], [data-act="edit"]').count(), 0);
   await shot('11-detail-desktop');
   await act('back'); await page.waitForSelector('#sheet tbody tr');

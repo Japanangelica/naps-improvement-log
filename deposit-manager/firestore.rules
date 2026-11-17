@@ -52,14 +52,14 @@ service cloud.firestore {
         && request.resource.data.status == 'active'
         && mine('createdByUid');
       // 店員只能操作進行中的單，且只能維持進行中或結案；退訂、作廢與結案後的修正限經理；
-      // 會計只能更改「已轉記」。
+      // 會計只能更改「已轉記」與「會計確認」。
       allow update: if isStaff()
         && !changed().hasAny(['orderNo', 'createdAt', 'bizDate', 'createdBy', 'createdByUid'])
         && (isManager()
-            || (isAccountant() && changed().hasOnly(['posted']))
+            || (isAccountant() && changed().hasOnly(['posted', 'reviewed']))
             || (isSeller() && resource.data.status == 'active'
                 && request.resource.data.status in ['active', 'closed']
-                && !changed().hasAny(['posted', 'refunded', 'forfeited'])));
+                && !changed().hasAny(['posted', 'reviewed', 'refunded', 'forfeited'])));
       allow delete: if false;
     }
 

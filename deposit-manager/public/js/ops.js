@@ -83,7 +83,7 @@ export function createOps(store, ctx) {
         const order = { orderNo, status: 'active', stage: 'ordered', createdAt: now.time, bizDate: now.date, ...f,
           deposit: pay.amount, tail: 0, refunded: 0, forfeited: 0, held: pay.amount, applied: 0, payMethods: pay.method,
           arrivedAt: '', notifiedAt: '', closedAt: '', closedBy: '', depositInvoice: pay.invoiceNo, finalInvoice: '',
-          legacyNo: '', posted: false, createdBy: u.name, createdByUid: u.uid, updatedAt: now.time, txCount: 1 };
+          legacyNo: '', posted: false, reviewed: false, createdBy: u.name, createdByUid: u.uid, updatedAt: now.time, txCount: 1 };
         order.keys = L.searchKeys(order);
         t.set('counters', now.key, { last: n });
         t.set('orders', orderNo, order);
@@ -205,14 +205,18 @@ export function createOps(store, ctx) {
     },
 
     /** 會計轉記勾選：會計把這張單抄到自己的帳本後勾選。限經理與會計。 */
-    async setPosted(orderNo, posted) {
-      const u = bookkeeper();
+    async setPosted(orderNo, posted) { return this.setFlag(orderNo, 'posted', posted); },
+
+    /** 會計用的兩個勾選：posted＝已轉記到正式帳本，reviewed＝會計已確認（審核）。限經理與會計。 */
+    async setFlag(orderNo, flag, value) {
+      const u = bookkeeper(), label = { posted: '轉記', reviewed: '會計確認' }[flag];
+      if (!label) throw new Error('勾選項目不正確');
       return store.tx(async t => {
         const o = await t.get('orders', String(orderNo));
         if (!o) throw new Error(`找不到訂金單 ${orderNo}`);
-        t.update('orders', o.orderNo, { posted: !!posted });
-        audit(t, u, posted ? '標記已轉記' : '取消轉記', o.orderNo, {});
-        return { ...o, posted: !!posted };
+        t.update('orders', o.orderNo, { [flag]: !!value });
+        audit(t, u, (value ? '勾選' : '取消') + label, o.orderNo, {});
+        return { ...o, [flag]: !!value };
       });
     },
 

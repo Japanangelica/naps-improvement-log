@@ -329,7 +329,9 @@ function renderDetail(v) {
       ${canPost() ? `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)"><span class="mute">${mgr ? '經理功能' : '會計功能'}</span>
         ${mgr && active ? '<button class="btn danger" data-act="mCancel">退訂</button>' : ''}
         ${mgr && o.status !== 'void' ? '<button class="btn danger" data-act="mVoid">作廢</button>' : ''}
-        <button class="btn" data-act="posted">${o.posted ? '✓ 會計已轉記（點此取消）' : '標記為會計已轉記'}</button></div>` : (o.posted ? '<p class="mute" style="margin:10px 0 0">✓ 會計已轉記</p>' : '')}</div>
+        <button class="btn" data-act="flag" data-v="posted">${o.posted ? '✓ 已轉記（點此取消）' : '標記為已轉記'}</button>
+        <button class="btn" data-act="flag" data-v="reviewed">${o.reviewed ? '✓ 會計已確認（點此取消）' : '標記為會計已確認'}</button></div>`
+        : (o.posted || o.reviewed ? `<p class="mute" style="margin:10px 0 0">${o.posted ? '✓ 已轉記　' : ''}${o.reviewed ? '✓ 會計已確認' : ''}</p>` : '')}</div>
     <div class="card"><h3>商品</h3><div class="scroll"><table><tr><th>品名</th><th>尺寸／顏色</th><th class="r">數量</th><th class="r">單價</th><th class="r">小計</th></tr>${o.items.map(it =>
       `<tr><td class="w">${esc(it.name)}</td><td>${esc(it.spec)}</td><td class="r num">${it.qty}</td><td class="r num">${it.price ? money(it.price) : '未定'}</td><td class="r num">${it.price ? money(it.qty * it.price) : ''}</td></tr>`).join('')}</table></div></div>
     <div class="card"><h3>資料</h3><dl>${dd('來源', esc(o.source))}${dd('預計到貨', esc(o.expectedDate))}${dd('保留期限', esc(o.holdUntil) + (L.isOverdue(o, L.twNow().date) ? ' <span class="pill over">已過期限</span>' : ''))}
@@ -431,7 +433,7 @@ const ORDER_COLS = [['orderNo', '單號'], [o => L.STATUS_LABEL[o.status], '狀�
   ['customer', '客戶'], ['phone', '電話'], ['source', '來源'], ['itemsText', '商品'], ['totalPrice', '商品總價'], ['deposit', '已收訂金'], ['tail', '尾款'],
   ['refunded', '已退款'], ['forfeited', '已沒收'], ['held', '未結訂金'], ['payMethods', '支付方式'], ['expectedDate', '預計到貨'], ['holdUntil', '保留期限'], ['arrivedAt', '到貨日'],
   ['notifiedAt', '通知日'], ['closedAt', '結案時間'], ['closedBy', '結案人員'], ['depositInvoice', '訂金發票'], ['finalInvoice', '結帳發票'], ['legacyNo', '舊帳本No'],
-  [o => (o.posted ? '是' : ''), '已轉記'], ['createdBy', '建立人'], ['note', '備註']];
+  [o => (o.posted ? '是' : ''), '已轉記'], [o => (o.reviewed ? '是' : ''), '會計確認'], ['createdBy', '建立人'], ['note', '備註']];
 const TX_COLS = [['txId', '收據編號'], ['orderNo', '單號'], ['customer', '客戶'], ['time', '時間'], ['bizDate', '營業日'], [x => L.TYPE_LABEL[x.type], '類型'], ['method', '支付方式'],
   ['amount', '金額(含稅)'], ['net', '未稅'], ['tax', '稅額'], ['payDate', '入金日'], ['ref', '參考號'], ['invoiceNo', '發票號碼'], ['staff', '經手人'], ['note', '備註'], [x => (x.voided ? '是' : ''), '作廢']];
 
@@ -479,7 +481,7 @@ function renderTable() {
   const t = S.table, today = L.twNow().date;
   if (!t.from) { t.from = today.slice(0, 8) + '01'; t.to = today; }
   $('#view').innerHTML = `<div class="card"><div class="row" style="align-items:flex-end">
-      <label class="f" style="margin:0"><span>狀態</span><select id="tStatus" style="width:auto">${[['all', '全部'], ['open', '未取貨（不限日期）'], ['closed', '已取貨'], ['refunded', '已退訂'], ['void', '已作廢'], ['unposted', '會計未轉記']]
+      <label class="f" style="margin:0"><span>狀態</span><select id="tStatus" style="width:auto">${[['all', '全部'], ['open', '未取貨（不限日期）'], ['closed', '已取貨'], ['refunded', '已退訂'], ['void', '已作廢'], ['unposted', '會計未轉記'], ['unreviewed', '會計未確認']]
         .map(s => `<option value="${s[0]}"${t.status === s[0] ? ' selected' : ''}>${s[1]}</option>`).join('')}</select></label>
       <label class="f" style="margin:0"><span>受注日 從</span><input id="tFrom" type="date" value="${t.from}" style="width:auto"></label>
       <label class="f" style="margin:0"><span>到</span><input id="tTo" type="date" value="${t.to}" style="width:auto"></label>
@@ -503,6 +505,7 @@ function sheetRows() {
   const t = S.table, q = t.q.trim().toLowerCase(), cols = sheetCols();
   let rows = t.status === 'open' ? S.open : (t.rows || []);
   if (t.status === 'unposted') rows = rows.filter(o => !o.posted && o.status !== 'void');
+  else if (t.status === 'unreviewed') rows = rows.filter(o => !o.reviewed && o.status !== 'void');
   else if (t.status !== 'all' && t.status !== 'open') rows = rows.filter(o => o.status === t.status);
   if (q) rows = rows.filter(o => cols.map(c => c[1](o)).join(' ').toLowerCase().includes(q));
   const col = cols.find(c => c[0] === t.sort) || cols[0];
@@ -516,10 +519,10 @@ function renderSheet() {
     <div><span class="mute">筆數（不含作廢）</span><b class="num">${sum.count}</b></div><div><span class="mute">訂金總計</span><b class="num">${money(sum.deposit)}</b></div>
     <div><span class="mute">已結帳折抵</span><b class="num">${money(sum.settled)}</b></div><div><span class="mute">退訂（退款＋沒收）</span><b class="num">${money(sum.cancelled)}</b></div>
     <div class="hl"><span class="mute">未結訂金</span><b class="num">${money(sum.open)}</b></div></div>`;
-  $('#sheet').innerHTML = rows.length ? `<table><thead><tr><th>轉記</th>${cols.map(c =>
+  $('#sheet').innerHTML = rows.length ? `<table><thead><tr><th>轉記</th><th>確認</th>${cols.map(c =>
       `<th class="${c[2] ? 'r' : ''}"><button data-act="tableSort" data-v="${c[0]}">${c[0]}${t.sort === c[0] ? (t.desc ? ' ▼' : ' ▲') : ''}</button></th>`).join('')}</tr></thead><tbody>${rows.map(o =>
-      `<tr class="${o.status === 'void' ? 'voided' : ''}" data-no="${esc(o.orderNo)}"><td class="c">${canPost()
-        ? `<input type="checkbox" data-post="${esc(o.orderNo)}"${o.posted ? ' checked' : ''} aria-label="會計已轉記">` : (o.posted ? '✓' : '')}</td>${cols.map((c, i) => {
+      `<tr class="${o.status === 'void' ? 'voided' : ''}" data-no="${esc(o.orderNo)}">${[['posted', '已轉記到正式帳本'], ['reviewed', '會計已確認']].map(f => `<td class="c">${canPost()
+        ? `<input type="checkbox" data-post="${esc(o.orderNo)}" data-flag="${f[0]}"${o[f[0]] ? ' checked' : ''} aria-label="${f[1]}" title="${f[1]}">` : (o[f[0]] ? '✓' : '')}</td>`).join('')}${cols.map((c, i) => {
         const v = c[1](o);
         return `<td class="${c[2] ? 'r num' : ''}${i === 0 ? ' mono' : ''}">${c[2] ? (v ? money(v) : '') : esc(v)}</td>`;
       }).join('')}</tr>`).join('')}</tbody></table>` : '<div class="empty">這個條件下沒有訂金單</div>';
@@ -597,7 +600,7 @@ const ACT = {
     closeModal(); toast('已退訂'); return reload(o);
   }),
   doVoid: el => run(el, async () => { const o = await S.ops.voidOrder(S.cur.order.orderNo, { reason: $('#mReason').value }); closeModal(); toast('已作廢'); return reload(o); }),
-  posted: el => run(el, async () => reload(await S.ops.setPosted(S.cur.order.orderNo, !S.cur.order.posted))),
+  flag: el => run(el, async () => reload(await S.ops.setFlag(S.cur.order.orderNo, el.dataset.v, !S.cur.order[el.dataset.v]))),
   print: async () => { if (!S.cur.txs.length) S.cur = await S.ops.getOrder(S.cur.order.orderNo); printReceipt(); },
 
   range: el => {
@@ -665,9 +668,9 @@ document.addEventListener('change', async e => {
     const box = e.target, no = box.dataset.post;
     box.disabled = true;
     try {
-      const o = await S.ops.setPosted(no, box.checked);
-      (S.table.rows || []).concat(S.open).filter(r => r.orderNo === no).forEach(r => { r.posted = o.posted; });
-      toast(o.posted ? '已標記轉記' : '已取消轉記');
+      const flag = box.dataset.flag, o = await S.ops.setFlag(no, flag, box.checked);
+      (S.table.rows || []).concat(S.open).filter(r => r.orderNo === no).forEach(r => { r[flag] = o[flag]; });
+      toast((o[flag] ? '已勾選' : '已取消') + (flag === 'posted' ? '轉記' : '會計確認'));
     } catch (err) { box.checked = !box.checked; toast(err.message, true); }
     box.disabled = false;
     return;

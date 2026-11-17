@@ -157,6 +157,9 @@ test('會計：只能查看、轉記、匯出；總表與帳本合計', async ()
   await assert.rejects(ops.closeOrder(a.orderNo, { totalPrice: 19600, method: '現金' }), /會計/);
   await assert.rejects(ops.voidOrder(a.orderNo, { reason: 'x' }), /經理/);
   assert.equal((await ops.setPosted(a.orderNo, true)).posted, true);
+  const rv = await ops.setFlag(a.orderNo, 'reviewed', true);
+  assert.equal(rv.reviewed, true); assert.equal(rv.posted, true);
+  await assert.rejects(ops.setFlag(a.orderNo, 'status', true), /不正確/);
   const today = L.twNow().date, rows = await ops.listOrders(today, today);
   assert.equal(rows.length, 3); assert.equal(rows.find(r => r.orderNo === a.orderNo).payMethods, '現金、信用卡');
   assert.deepEqual(L.ledgerTotals(rows), { count: 3, deposit: 12000, settled: 3000, cancelled: 5000, open: 4000 });
