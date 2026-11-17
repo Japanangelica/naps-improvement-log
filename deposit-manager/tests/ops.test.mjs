@@ -168,3 +168,26 @@ test('會計：只能查看、轉記、匯出；總表與帳本合計', async ()
   user.role = 'staff';
   await assert.rejects(ops.setPosted(a.orderNo, false), /經理或會計/);
 });
+
+test('匯入舊帳本：狀態、金額、合計一致；重複執行會略過；限經理', async () => {
+  const { ops, user } = setup();
+  const rec = (no, outcome, amount, extra = {}) => ({ legacyNo: no, date: '2025-03-01', customer: '舊客戶' + no, phone: '0911000' + no,
+    itemName: '舊商品', totalPrice: amount * 2, createdBy: '阿容', source: '', outcome, stage: 'notified', arrivedAt: '', closedBy: '蘇',
+    closedDate: outcome === 'active' ? '' : '2025-04-01', finalInvoice: '', note: '', posted: true, reviewed: false,
+    deposit: { amount, method: '現金', payDate: '', date: '2025-03-01', invoiceNo: 'AB12345678', staff: '阿容' }, ...extra });
+  const data = { format: 'deposit-legacy-v1', records: [rec('101', 'active', 1000), rec('102', 'closed', 2000), rec('103', 'refunded', 500)] };
+  user.role = 'staff';
+  await assert.rejects(ops.importLegacy(data), /經理/);
+  user.role = 'manager';
+  await assert.rejects(ops.importLegacy({ format: 'x', records: [] }), /格式/);
+  await assert.rejects(ops.importLegacy({ ...data, records: [rec('104', 'closed', 0)] }), /前受金/);
+  assert.deepEqual(await ops.importLegacy(data), { added: 3, skipped: 0 });
+  assert.deepEqual(await ops.importLegacy(data), { added: 0, skipped: 3 });
+  const rows = await ops.listOrders('2025-01-01', '2025-12-31');
+  assert.deepEqual(L.ledgerTotals(rows), { count: 3, deposit: 3500, settled: 2000, cancelled: 500, open: 1000 });
+  assert.equal((await ops.search('101')).length, 1);
+  assert.deepEqual(await ops.integrityCheck(false), []);
+  const o = await ops.closeOrder('OLD-101', { totalPrice: 2000, method: '信用卡' });  // 匯入的未結單可接續操作
+  assert.equal(o.tail, 1000);
+  assert.equal((await ops.getOrder('OLD-101')).txs.length, 2);
+});

@@ -49,8 +49,10 @@ service cloud.firestore {
       allow read: if isStaff();
       allow create: if isSeller()
         && request.resource.data.orderNo == orderNo
-        && request.resource.data.status == 'active'
-        && mine('createdByUid');
+        && mine('createdByUid')
+        && (request.resource.data.status == 'active'
+            // 經理匯入舊帳本：單號必須是 OLD- 開頭
+            || (isManager() && request.resource.data.legacy == true && orderNo.matches('OLD-.+')));
       // 店員只能操作進行中的單，且只能維持進行中或結案；退訂、作廢與結案後的修正限經理；
       // 會計只能更改「已轉記」與「會計確認」。
       allow update: if isStaff()

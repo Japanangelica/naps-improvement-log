@@ -299,6 +299,66 @@ export function createOps(store, ctx) {
       return s;
     },
 
+    /**
+     * 匯入舊帳本（tools/convert_ledger.py 產生的 JSON）。單號為 OLD-舊編號，已存在的會略過，可重複執行。
+     * 只寫入訂金與退訂的收付；舊帳本的尾款是在 POS 收的，不另建明細。限經理。
+     */
+    async importLegacy(data, onProgress) {
+      const u = needManager();
+      if (!data || data.format !== 'deposit-legacy-v1' || !Array.isArray(data.records)) throw new Error('檔案格式不正確，請使用轉檔工具產生的匯入檔');
+      const STAGES = ['ordered', 'arrived', 'notified'], OUTCOMES = ['active', 'closed', 'refunded'];
+      const build = r => {
+        const legacyNo = L.cleanText(r.legacyNo, 20).replace(/[^\w-]/g, '');
+        const date = L.cleanDate(r.date, '受注日'), dep = r.deposit || {};
+        if (!legacyNo || !date) throw new Error(`舊帳本 No. ${r.legacyNo} 缺少編號或受注日`);
+        if (!OUTCOMES.includes(r.outcome)) throw new Error(`舊帳本 No. ${legacyNo} 的狀態不正確`);
+        const amount = L.toInt(dep.amount, `舊帳本 No. ${legacyNo} 的前受金`);
+        const totalPrice = L.toInt(r.totalPrice || 0, `舊帳本 No. ${legacyNo} 的受注金額`, { allowZero: true });
+        const items = [{ name: L.cleanText(r.itemName, 120) || '（未填）', spec: '', qty: 1, price: totalPrice }];
+        const orderNo = 'OLD-' + legacyNo, status = r.outcome, refunded = status === 'refunded' ? amount : 0;
+        const payDate = L.cleanDate(dep.date, '收款日') || date, closed = L.cleanDate(r.closedDate, '精算日');
+        const order = { orderNo, status, stage: STAGES.includes(r.stage) ? r.stage : 'ordered', createdAt: date + ' 00:00:00', bizDate: date,
+          customer: L.cleanText(r.customer, 50) || '（未填）', phone: L.cleanPhone(r.phone), items, itemsText: L.itemsText(items), totalPrice,
+          source: L.cleanText(r.source, 20), expectedDate: '', holdUntil: '', note: L.cleanText(r.note, 500),
+          deposit: amount, tail: 0, refunded, forfeited: 0, held: status === 'active' ? amount : 0, applied: status === 'closed' ? amount : 0,
+          payMethods: L.cleanText(dep.method, 30), arrivedAt: L.cleanDate(r.arrivedAt, '檢品日'), notifiedAt: '',
+          closedAt: status === 'active' ? '' : (closed || date) + ' 00:00:00', closedBy: L.cleanText(r.closedBy, 30),
+          depositInvoice: L.cleanText(dep.invoiceNo, 30).toUpperCase(), finalInvoice: L.cleanText(r.finalInvoice, 30).toUpperCase(),
+          legacyNo, legacy: true, posted: !!r.posted, reviewed: !!r.reviewed, createdBy: L.cleanText(r.createdBy, 30),
+          createdByUid: u.uid, updatedAt: L.twNow().time, txCount: refunded ? 2 : 1 };
+        order.keys = L.searchKeys(order);
+        const tx = (n, type, d) => {
+          const { net, tax } = L.splitTax(amount, cfg().taxRate);
+          return { txId: L.makeTxId(orderNo, n), orderNo, customer: order.customer, time: d + ' 00:00:00', bizDate: d, ts: store.serverTime(),
+            type, method: order.payMethods, amount, net, tax, payDate: type === 'deposit' ? L.cleanDate(dep.payDate, '入金日') : '',
+            ref: '', invoiceNo: type === 'deposit' ? order.depositInvoice : '', note: '舊帳本匯入',
+            staff: L.cleanText(dep.staff, 30) || order.createdBy, staffUid: u.uid, voided: false, legacy: true };
+        };
+        return { order, txs: [tx(1, 'deposit', payDate)].concat(refunded ? [tx(2, 'refund', closed || date)] : []) };
+      };
+      const all = data.records.map(build); // 先全部檢查，有錯就整批不匯入
+      let added = 0, skipped = 0;
+      for (let i = 0; i < all.length; i += 40) {
+        const chunk = all.slice(i, i + 40);
+        const r = await store.tx(async t => {
+          const exist = [];
+          for (const c of chunk) exist.push(await t.get('orders', c.order.orderNo));
+          let a = 0;
+          chunk.forEach((c, j) => {
+            if (exist[j]) return;
+            t.set('orders', c.order.orderNo, c.order);
+            c.txs.forEach(x => t.set('transactions', x.txId, x));
+            a++;
+          });
+          return a;
+        });
+        added += r; skipped += chunk.length - r;
+        if (onProgress) onProgress(Math.min(i + 40, all.length), all.length);
+      }
+      await store.tx(async t => { audit(t, u, '匯入舊帳本', '', { 新增: added, 略過: skipped }); });
+      return { added, skipped };
+    },
+
     async listStaff() { needManager(); return store.query('staff'); },
 
     async saveStaff(uid, p) {

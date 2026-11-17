@@ -451,6 +451,8 @@ async function renderSettings() {
       ${field('預設保留天數', `<input id="cHold" type="number" min="0" value="${esc(s.holdDays)}">`, '0 表示不預設')}
       ${field('是否另外開立發票', `<select id="cInv"><option value="1"${inv() ? ' selected' : ''}>是，顯示發票號碼欄位</option><option value="0"${inv() ? '' : ' selected'}>否，只用本系統的收據</option></select>`)}
       ${field('收據條款', `<textarea id="cTerms">${esc(s.terms)}</textarea>`)}<button class="btn pri" data-act="saveSettings">儲存設定</button></div>
+    <div class="card"><h2>匯入舊帳本</h2><p class="mute">選擇轉檔工具產生的匯入檔（.json）。單號為「OLD-舊編號」，已匯入過的會自動略過，可重複執行。</p>
+      <input id="impFile" type="file" accept=".json,application/json"><div id="impOut" style="margin-top:10px"></div></div>
     <div class="card"><h2>資料檢查</h2><p class="mute">用收付明細重新加總每張單，確認金額一致。</p><button class="btn" data-act="integrity">開始檢查</button><div id="chkOut" style="margin-top:10px"></div></div>`;
   try {
     const rows = await S.ops.listStaff();
@@ -638,6 +640,11 @@ const ACT = {
     $('#chkOut').innerHTML = bad.length ? `<div class="err">有 ${bad.length} 張單的金額與明細不一致：<br>${bad.map(b => `${esc(b.orderNo)}（${esc(b.fields.join('，'))}）`).join('<br>')}</div>
       <button class="btn pri" data-act="integrityFix">依明細修正</button>` : '<span class="pill closed">全部一致</span>';
   }),
+  doImport: el => run(el, async () => {
+    const r = await S.ops.importLegacy(S.importData, (n, total) => { $('#impOut').querySelector('.mute').textContent = `匯入中… ${n} / ${total}`; });
+    S.importData = null;
+    $('#impOut').innerHTML = `<span class="pill closed">完成：新增 ${r.added} 筆，略過已存在 ${r.skipped} 筆</span>`;
+  }),
   integrityFix: el => run(el, async () => { await S.ops.integrityCheck(true); $('#chkOut').innerHTML = '<span class="pill closed">已修正</span>'; })
 };
 
@@ -664,6 +671,20 @@ document.addEventListener('input', e => {
   else if (e.target.closest('#items') || id === 'fAmt') updateFormSum();
 });
 document.addEventListener('change', async e => {
+  if (e.target.id === 'impFile') { // 匯入前先顯示摘要，與 Excel 帳本上方的合計核對
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      const data = JSON.parse(await f.text()), recs = data.records || [];
+      const sum = k => recs.filter(r => !k || r.outcome === k).reduce((a, r) => a + ((r.deposit && r.deposit.amount) || 0), 0);
+      S.importData = data;
+      $('#impOut').innerHTML = `<table><tr><th>筆數</th><td class="r num">${recs.length}</td></tr><tr><th>前受金總計</th><td class="r num">${money(sum())}</td></tr>
+        <tr><th>已精算</th><td class="r num">${money(sum('closed'))}</td></tr><tr><th>取消</th><td class="r num">${money(sum('refunded'))}</td></tr>
+        <tr><th>未精算</th><td class="r num">${money(sum('active'))}</td></tr></table>
+        <p class="mute">請與 Excel 帳本右上角的四個合計核對，一致再按匯入。</p><button class="btn pri" data-act="doImport">開始匯入</button>`;
+    } catch { $('#impOut').innerHTML = '<div class="err">無法讀取這個檔案，請確認是轉檔工具產生的 .json</div>'; }
+    return;
+  }
   if (e.target.dataset.post) { // 總表上的轉記勾選
     const box = e.target, no = box.dataset.post;
     box.disabled = true;
