@@ -1,0 +1,4 @@
+# 舊帳本匯入檔含客戶個資，不可提交
+legacy-import*.json
+node_modules/
+.firebase/

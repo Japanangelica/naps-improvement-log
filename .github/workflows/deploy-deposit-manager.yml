@@ -1,0 +1,42 @@
+name: 部署訂金管理系統
+
+# 合併到 main（或在 Actions 頁面手動按 Run workflow）時，自動測試並部署到 Firebase。
+# 需要先在儲存庫 Settings → Secrets and variables → Actions 新增 FIREBASE_SERVICE_ACCOUNT。
+on:
+  push:
+    branches: [main]
+    paths: ['deposit-manager/**', '.github/workflows/deploy-deposit-manager.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-deposit-manager
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: deposit-manager
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 自動測試
+        run: npm test
+      - name: 部署網站與安全規則
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::尚未設定 FIREBASE_SERVICE_ACCOUNT，請依 deposit-manager/README.md 的步驟新增。"
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          PROJECT_ID=$(node -e "console.log(require(process.argv[1]).project_id)" "$RUNNER_TEMP/sa.json")
+          npx --yes firebase-tools@13 deploy --only hosting,firestore:rules --project "$PROJECT_ID" --non-interactive
+          rm -f "$RUNNER_TEMP/sa.json"
