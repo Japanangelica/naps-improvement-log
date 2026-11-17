@@ -1,0 +1,10 @@
+{
+  "name": "deposit-manager",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:ui": "node tests/ui.mjs",
+    "serve": "node tools/serve.mjs"
+  }
+}

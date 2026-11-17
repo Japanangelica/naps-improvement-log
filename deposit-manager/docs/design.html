@@ -130,14 +130,14 @@
   <p>採用不需要編譯的純網頁程式（HTML＋JavaScript 模組＋Firebase 官方 SDK），檔案少、日後修改容易。</p>
   <div class="wrap"><table>
     <tr><th>檔案</th><th>內容</th></tr>
-    <tr><td><code>public/index.html</code></td><td>操作畫面：登入、新增、查詢、明細與操作、未結清單、日結、月結、收據</td></tr>
-    <tr><td><code>public/logic.js</code></td><td>純運算：金額加總、含稅拆分、狀態判斷、輸入檢查。不碰資料庫，可單獨測試</td></tr>
-    <tr><td><code>public/db.js</code></td><td>資料存取：配號、建單、收付款都包在 Firestore 交易裡，一次全部成功或全部不寫</td></tr>
+    <tr><td><code>public/index.html</code>、<code>js/app.js</code></td><td>操作畫面：登入、未取貨清單、收訂金、明細與操作、報表、設定、收據</td></tr>
+    <tr><td><code>js/logic.js</code></td><td>純運算：金額加總、含稅拆分、輸入檢查、報表彙總。不碰資料庫，可單獨測試</td></tr>
+    <tr><td><code>js/ops.js</code></td><td>業務操作：配號、收訂金、追加、到貨、結帳、退訂、作廢，全部包在資料庫交易裡，一次全部成功或全部不寫</td></tr>
+    <tr><td><code>js/store-firebase.js</code></td><td>連接 Firebase 的資料庫與登入</td></tr>
+    <tr><td><code>js/store-memory.js</code></td><td>示範模式用的資料庫（資料只存在瀏覽器），也供自動測試使用</td></tr>
     <tr><td><code>firestore.rules</code></td><td>安全規則：登入才能讀寫、明細與異動紀錄只能新增、退訂與作廢限經理、經手人必須是本人</td></tr>
-    <tr><td><code>firestore.indexes.json</code>、<code>firebase.json</code></td><td>查詢索引與部署設定</td></tr>
-    <tr><td><code>tools/import.js</code></td><td>把舊帳本 Excel 匯入 Firestore</td></tr>
-    <tr><td><code>tests/</code></td><td>運算邏輯的單元測試；用 Firebase 本機模擬器測試安全規則與完整流程</td></tr>
-  </table></div>
+    <tr><td><code>tests/</code></td><td>金額與流程的自動測試；瀏覽器實際操作的流程測試</td></tr>
+    </table></div>
   <h3>沒有後端時，如何確保帳不會亂</h3>
   <ul>
     <li><b>交易寫入</b>：新增一筆收付明細與更新訂金單合計在同一個交易內完成，不會只寫一半。</li>
@@ -248,8 +248,9 @@
     <tr><td>正式切換</td><td>舊帳本改為唯讀封存</td><td>—</td></tr>
   </table></div>
   <h3>目前進度</h3>
-  <p><span class="tag ok">已完成</span> 舊帳本分析、Firebase 架構與資料設計（本文件）。</p>
-  <p><span class="tag w">尚未開始</span> Firebase 版程式。先前寫的 Apps Script 雛形因改用 Firebase 已移除，其中的畫面流程與金額規則會沿用。</p>
+  <p><span class="tag ok">已完成並測試</span> 收訂金與配號、追加訂金、到貨與通知、取貨結帳（含尾款）、退訂（退還＋沒收）、作廢、品項明細、含稅拆分、日結與期間報表、匯出、人員與設定、資料檢查、收據。以示範模式通過自動測試與瀏覽器流程測試。</p>
+  <p><span class="tag w">尚未驗證</span> 連接真正 Firebase 的部分與安全規則已寫好，但開發環境無法連到 Firebase，需等專案建立後實機驗證。</p>
+  <p><span class="tag w">尚未開始</span> 舊帳本 805 筆匯入。</p>
 </section>
 
 <section>

@@ -1,0 +1,85 @@
+rules_version = '2';
+
+// 訂金管理系統的安全規則。
+// 原則：登入且啟用的人員才能讀寫；收付明細與異動紀錄只能新增；
+// 退訂、作廢、轉記、人員與設定限經理；任何資料都不能刪除。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function myStaff() { return /databases/$(database)/documents/staff/$(request.auth.uid); }
+    function isStaff() { return signedIn() && exists(myStaff()) && get(myStaff()).data.active == true; }
+    function isManager() { return isStaff() && get(myStaff()).data.role == 'manager'; }
+    function notInitialized() { return !exists(/databases/$(database)/documents/settings/main); }
+    function mine(field) { return request.resource.data[field] == request.auth.uid; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    match /staff/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isStaff());
+      allow list: if isStaff();
+      // 第一次使用（尚無設定）時，登入者可把自己設為第一位經理。
+      allow create: if isManager()
+        || (request.auth.uid == uid && notInitialized()
+            && request.resource.data.role == 'manager' && request.resource.data.active == true);
+      allow update: if isManager();
+      allow delete: if false;
+    }
+
+    match /settings/{id} {
+      allow get: if signedIn();
+      allow list: if isStaff();
+      allow create: if isManager()
+        || (id == 'main' && notInitialized() && getAfter(myStaff()).data.role == 'manager');
+      allow update: if isManager();
+      allow delete: if false;
+    }
+
+    // 每日流水號：只能從 1 開始、每次加 1。
+    match /counters/{key} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.last == 1;
+      allow update: if isStaff() && request.resource.data.last == resource.data.last + 1;
+      allow delete: if false;
+    }
+
+    match /orders/{orderNo} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.orderNo == orderNo
+        && request.resource.data.status == 'active'
+        && mine('createdByUid');
+      // 店員只能操作進行中的單，且只能維持進行中或結案；退訂、作廢、轉記與結案後的修正限經理。
+      allow update: if isStaff()
+        && !changed().hasAny(['orderNo', 'createdAt', 'bizDate', 'createdBy', 'createdByUid'])
+        && (isManager()
+            || (resource.data.status == 'active'
+                && request.resource.data.status in ['active', 'closed']
+                && !changed().hasAny(['posted', 'refunded', 'forfeited'])));
+      allow delete: if false;
+    }
+
+    match /transactions/{txId} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.txId == txId
+        && mine('staffUid')
+        && request.resource.data.ts == request.time
+        && request.resource.data.amount is int && request.resource.data.amount > 0
+        && request.resource.data.voided == false
+        && existsAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderNo))
+        && (request.resource.data.type in ['deposit', 'tail']
+            || (request.resource.data.type in ['refund', 'forfeit'] && isManager()));
+      // 明細不可修改；唯一例外是經理把它標記為作廢。
+      allow update: if isManager()
+        && changed().hasOnly(['voided', 'voidedAt', 'voidedBy'])
+        && request.resource.data.voided == true;
+      allow delete: if false;
+    }
+
+    match /audit/{id} {
+      allow read: if isManager();
+      allow create: if isStaff() && mine('staffUid') && request.resource.data.ts == request.time;
+      allow update, delete: if false;
+    }
+  }
+}
