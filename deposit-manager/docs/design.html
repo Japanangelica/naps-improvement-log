@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>訂金管理系統設計書</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  /* 版面：單欄文件，章節編號對應閱讀順序（現況→架構→技術→資料→流程→時程→待確認） */
+  :root {
+    --bg:#f3f5f7; --paper:#ffffff; --ink:#18222d; --mute:#5c6b7a; --line:#d5dce3;
+    --accent:#d9480f; --accent-soft:#fdebe1; --ok:#1b7a4b; --warn:#a15c00;
+    --display:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+    --body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#10161c; --paper:#18212a; --ink:#e6ecf1; --mute:#9aa8b5; --line:#2e3a46; --accent:#ff8a50; --accent-soft:#3a2418; --ok:#5fd19a; --warn:#f0b35a; color-scheme:dark; }
+  }
+  :root[data-theme="dark"] { --bg:#10161c; --paper:#18212a; --ink:#e6ecf1; --mute:#9aa8b5; --line:#2e3a46; --accent:#ff8a50; --accent-soft:#3a2418; --ok:#5fd19a; --warn:#f0b35a; color-scheme:dark; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--body); font-size:16px; line-height:1.75; }
+  main { max-width:880px; margin:0 auto; padding:32px 20px 64px; display:flex; flex-direction:column; gap:28px; }
+  header h1 { font-family:var(--display); font-weight:900; font-size:30px; line-height:1.3; margin:0 0 8px; text-wrap:balance; }
+  header p { margin:0; color:var(--mute); max-width:38em; }
+  section { background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:24px; }
+  h2 { font-family:var(--display); font-size:20px; font-weight:700; margin:0 0 14px; display:flex; gap:10px; align-items:baseline; text-wrap:balance; }
+  h2 .n { font-family:var(--mono); color:var(--accent); font-size:15px; }
+  h3 { font-size:16px; margin:20px 0 8px; }
+  p { margin:0 0 12px; max-width:40em; } p:last-child { margin-bottom:0; }
+  ul, ol { margin:0 0 12px; padding-left:1.4em; max-width:40em; } li { margin-bottom:4px; }
+  .wrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:14.5px; min-width:560px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:500; font-size:13px; white-space:nowrap; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  code, .mono { font-family:var(--mono); font-size:.92em; }
+  .pick { background:var(--accent-soft); } .pick td:first-child { font-weight:700; }
+  .tag { display:inline-block; font-size:12px; font-weight:700; padding:1px 8px; border-radius:99px; border:1px solid currentColor; white-space:nowrap; }
+  .tag.a { color:var(--accent); } .tag.ok { color:var(--ok); } .tag.w { color:var(--warn); }
+  .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
+  .fact { border-left:3px solid var(--accent); padding:2px 0 2px 12px; }
+  .fact b { display:block; font-size:22px; font-variant-numeric:tabular-nums; line-height:1.3; } .fact span { color:var(--mute); font-size:13px; }
+  figure { margin:8px 0 16px; } figure .wrap svg { display:block; min-width:640px; width:100%; height:auto; color:var(--ink); }
+  figcaption { color:var(--mute); font-size:13.5px; margin-top:8px; max-width:44em; }
+  .steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+  .steps > div { border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .steps h3 { margin-top:0; } .steps ol { margin-bottom:0; }
+  .sec { color:var(--mute); font-family:var(--mono); font-size:13px; }
+  .note { border-left:3px solid var(--warn); padding:8px 14px; background:var(--bg); border-radius:0 6px 6px 0; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>訂金管理系統設計書</h1>
+  <p>台灣 NAPS 新北店｜以現行「客注品精算確認リスト」為基礎，改為 Google 免費服務上的單號管理系統。目標是店員 30 秒內完成一筆操作，且未來不開發票時，本系統的紀錄也足以對帳。</p>
+</header>
+
+<section>
+  <h2><span class="n">01</span>現行帳本的觀察</h2>
+  <div class="facts">
+    <div class="fact"><b>805 筆</b><span>帳本累計（2025 年 313 筆、2026 年至今 257 筆）</span></div>
+    <div class="fact"><b>53 筆</b><span>尚未精算</span></div>
+    <div class="fact"><b>$478,232</b><span>未精算訂金（含稅）</span></div>
+    <div class="fact"><b>31 筆</b><span>取消，共 $120,340</span></div>
+  </div>
+  <div class="wrap"><table>
+    <tr><th>觀察到的情況</th><th>造成的問題</th><th>新系統的做法</th></tr>
+    <tr><td>支付類別：現金 54%、信用卡 23%、銀行入金 22%，另有 LINE Pay、振興券</td><td>銀行入金的日期寫在括號裡，無法依方式加總</td><td>支付方式用按鈕選，入金日另有欄位，日結自動依方式加總</td></tr>
+    <tr><td>同一位人員有 3 種寫法（本名、暱稱、日文名）</td><td>無法依人員統計或追蹤</td><td>登入後自動帶入經手人，不用手打</td></tr>
+    <tr><td>No. 是 <code>=上一列+1</code> 的公式</td><td>插入或刪除列，後面的編號全部跟著變</td><td>系統配號，鎖定後不可更改、不重複使用</td></tr>
+    <tr><td>結帳發票號碼寫在備考欄；換開發票用「舊→新」（43 筆）</td><td>查不到、對不起來</td><td>訂金發票、結帳發票各有欄位，換開留下紀錄</td></tr>
+    <tr><td>任何人都能直接改任何儲存格</td><td>沒有修改軌跡，出錯難追查</td><td>店員只透過畫面操作，每次變更寫入異動紀錄</td></tr>
+    <tr><td>89% 的單「受注金額」與「前受金」相同</td><td>看不出商品總價與尾款</td><td>分開記錄商品總價、訂金、尾款</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2><span class="n">02</span>專案架構</h2>
+  <figure>
+    <div class="wrap"><svg viewBox="0 0 760 290" role="img" aria-label="店員以瀏覽器操作 Apps Script 網頁程式，程式讀寫 Google 試算表，並寄送到期提醒與每週備份">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="20" y="40" width="180" height="84" rx="6"/>
+        <rect x="290" y="40" width="180" height="84" rx="6" stroke="#d9480f" stroke-width="2.5"/>
+        <rect x="560" y="40" width="180" height="84" rx="6"/>
+        <rect x="290" y="206" width="180" height="60" rx="6"/>
+        <rect x="560" y="206" width="180" height="60" rx="6"/>
+        <line x1="200" y1="82" x2="288" y2="82" marker-end="url(#ar)"/>
+        <line x1="470" y1="82" x2="558" y2="82" marker-end="url(#ar)"/>
+        <line x1="380" y1="124" x2="380" y2="204" marker-end="url(#ar)"/>
+        <line x1="650" y1="124" x2="650" y2="204" marker-end="url(#ar)"/>
+      </g>
+      <g fill="currentColor" font-size="13" text-anchor="middle">
+        <text x="110" y="74" font-weight="700" font-size="14">店員手機／店內電腦</text><text x="110" y="96">瀏覽器開啟網址</text><text x="110" y="114">姓名＋PIN 登入</text>
+        <text x="380" y="74" font-weight="700" font-size="14">Apps Script 網頁程式</text><text x="380" y="96">配單號、檢查金額</text><text x="380" y="114">權限、報表、收據</text>
+        <text x="650" y="74" font-weight="700" font-size="14">Google 試算表</text><text x="650" y="96">訂金單、品項</text><text x="650" y="114">收付明細、異動紀錄</text>
+        <text x="380" y="232" font-weight="700" font-size="14">Gmail</text><text x="380" y="252">到期提醒信</text>
+        <text x="650" y="232" font-weight="700" font-size="14">Google 雲端硬碟</text><text x="650" y="252">試算表備份</text>
+        <text x="244" y="72" font-size="12">輸入、查詢</text><text x="514" y="72" font-size="12">鎖定後讀寫</text>
+        <text x="418" y="170" font-size="12" text-anchor="start">每天 9 點</text><text x="688" y="170" font-size="12" text-anchor="start">每週複本</text>
+      </g>
+    </svg></div>
+    <figcaption>店員不直接碰試算表，所有寫入都經過中間的程式（橘框）。程式負責配號與檢查，試算表只當資料庫；店長與會計可直接開試算表查看或做樞紐分析。</figcaption>
+  </figure>
+  <p>全部使用同一個 Google 帳號內的免費服務，不需要另外租主機或資料庫。以目前一年約 300 筆的量，遠低於免費額度。</p>
+</section>
+
+<section>
+  <h2><span class="n">03</span>技術選擇</h2>
+  <div class="wrap"><table>
+    <tr><th>方案</th><th>費用</th><th>優點</th><th>缺點</th></tr>
+    <tr class="pick"><td>Google 試算表＋Apps Script 網頁 <span class="tag a">採用</span></td><td>免費</td><td>資料就在試算表，會計可直接看；手機可用；程式能鎖單號、留軌跡</td><td>同時寫入需排隊（已用鎖定處理）；適合每年數千筆以內</td></tr>
+    <tr><td>AppSheet</td><td>多人正式使用通常需付費授權</td><td>不寫程式就能做表單</td><td>沖銷、退訂、日結這類規則難以完整表達</td></tr>
+    <tr><td>Firebase／Cloud Run</td><td>有免費額度，超量計費</td><td>效能與彈性最高</td><td>需要工程師長期維運，對目前的量是過度設計</td></tr>
+    <tr><td>維持純試算表</td><td>免費</td><td>不用學新東西</td><td>編號會跑掉、可任意修改、沒有軌跡</td></tr>
+  </table></div>
+  <h3>程式結構</h3>
+  <div class="wrap"><table>
+    <tr><th>檔案</th><th>內容</th></tr>
+    <tr><td><code>Code.gs</code></td><td>後端：資料存取、配號、收付與狀態運算、權限、報表、提醒信、試算表選單</td></tr>
+    <tr><td><code>Index.html</code></td><td>操作畫面：登入、新增、查詢、明細與操作、未結清單、日結、收據列印</td></tr>
+    <tr><td><code>tests/</code></td><td>以模擬的試算表環境自動測試金額運算與流程</td></tr>
+  </table></div>
+  <p>只有兩個主要檔案，安裝時貼進試算表的 Apps Script 編輯器即可，不需要安裝任何開發工具。</p>
+</section>
+
+<section>
+  <h2><span class="n">04</span>資料設計</h2>
+  <p>核心原則：<b>收付明細只新增、不修改</b>。訂金單上的已收、餘額等數字一律由收付明細加總而來，因此帳一定對得起來，也能隨時重算驗證。</p>
+  <div class="wrap"><table>
+    <tr><th>工作表</th><th>一列代表</th><th>主要欄位</th></tr>
+    <tr><td>訂金單</td><td>一張單</td><td>單號、狀態、受注日、客戶、電話／會員號、來源（門市／蝦皮／FB／LINE）、商品總價、已收訂金、已收尾款、訂金餘額、到貨日、通知日、結案日、受注人員、結帳人員、舊帳本 No.、已轉記、備註</td></tr>
+    <tr><td>品項明細 <span class="tag w">新增</span></td><td>一個品項</td><td>單號、品名、規格（尺寸／顏色）、數量、單價、小計</td></tr>
+    <tr><td>收付明細</td><td>一筆錢</td><td>收據編號、單號、時間、類型（訂金／尾款／退款／沒收）、支付方式、金額、未稅額、稅額、入金日、參考號、發票號碼、經手人</td></tr>
+    <tr><td>異動紀錄</td><td>一次操作</td><td>時間、人員、動作、單號、修改前後內容</td></tr>
+    <tr><td>人員／設定／序號</td><td>—</td><td>人員與權限、支付方式清單、保留天數、收據條款、每日流水號</td></tr>
+  </table></div>
+  <h3>單號規則</h3>
+  <div class="wrap"><table>
+    <tr><th>編號</th><th>格式</th><th>範例</th><th>說明</th></tr>
+    <tr><td>訂金單號</td><td>前綴-年月日-當日流水</td><td class="mono">DP-261117-001</td><td>一看就知道哪天收的；客戶報後三碼加日期即可查到</td></tr>
+    <tr><td>收據編號</td><td>訂金單號-序</td><td class="mono">DP-261117-001-02</td><td>每筆收款、退款各有一號，不開發票時作為憑證編號</td></tr>
+    <tr><td>舊帳本 No.</td><td>原流水號</td><td class="mono">1053</td><td>匯入時保留，舊單仍可用原編號查詢</td></tr>
+  </table></div>
+  <p>配號時系統會鎖定，兩台裝置同時送出也不會拿到同一號。作廢的單號保留在帳上，不會重複使用，因此編號不會跳號而無從解釋。</p>
+  <h3>因應未來不開發票，需要比現在多記的內容</h3>
+  <ul>
+    <li><b>品項明細</b>：品名、數量、單價逐項記錄，取代現在一格文字的「代表商品」。</li>
+    <li><b>尾款</b>：取貨時收的尾款與支付方式也記在本系統。這樣一張單的全部金流都在這裡。</li>
+    <li><b>含稅拆分</b>：每筆金額自動拆出未稅額與 5% 稅額，對應帳本上方的「税抜／税込」。</li>
+    <li><b>收據</b>：每筆收款可列印或截圖給客戶，上面有收據編號、品項、金額、條款。</li>
+    <li><b>月結表</b>：前受金總計、已精算、取消、未精算四個數字，與現行帳本右上角相同，另加依支付方式的明細。</li>
+  </ul>
+  <p class="note">是否可以不開立發票屬於稅務規定，系統只能提供完整紀錄。實際做法請先與會計師確認，設計上保留發票號碼欄位，兩種情況都能使用。</p>
+</section>
+
+<section>
+  <h2><span class="n">05</span>訂金單的狀態流程</h2>
+  <figure>
+    <div class="wrap"><svg viewBox="0 0 860 220" role="img" aria-label="訂金單由已收訂經已到貨、已通知到已結案，途中可退訂，登打錯誤可由經理作廢">
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="20" y="30" width="140" height="50" rx="6"/><rect x="247" y="30" width="140" height="50" rx="6"/>
+        <rect x="474" y="30" width="140" height="50" rx="6"/><rect x="700" y="30" width="140" height="50" rx="6" stroke="#d9480f" stroke-width="2.5"/>
+        <rect x="247" y="150" width="140" height="50" rx="6"/><rect x="700" y="150" width="140" height="50" rx="6" stroke-dasharray="5 4"/>
+        <line x1="160" y1="55" x2="245" y2="55" marker-end="url(#ar)"/><line x1="387" y1="55" x2="472" y2="55" marker-end="url(#ar)"/><line x1="614" y1="55" x2="698" y2="55" marker-end="url(#ar)"/>
+        <polyline points="90,80 90,115 544,115 544,80"/><line x1="317" y1="80" x2="317" y2="148" marker-end="url(#ar)"/>
+        <polyline points="544,115 770,115 770,148" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+      </g>
+      <g fill="currentColor" font-size="14" font-weight="700" text-anchor="middle">
+        <text x="90" y="60">已收訂</text><text x="317" y="60">已到貨</text><text x="544" y="60">已通知</text><text x="770" y="60">已結案</text><text x="317" y="180">已退訂</text><text x="770" y="180">已作廢</text>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="203" y="46">填檢品日</text><text x="430" y="46">聯絡客戶</text><text x="657" y="46">取貨收尾款</text>
+        <text x="327" y="138" text-anchor="start">退款或沒收</text><text x="760" y="138" text-anchor="end">登打錯誤（限經理）</text>
+      </g>
+    </svg></div>
+    <figcaption>上排對應現行帳本的「検品日 → 連絡状況 → 精算日」。結案前任何階段都可退訂；作廢只用於登打錯誤，紀錄保留但不計入報表。</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2><span class="n">06</span>30 秒操作設計</h2>
+  <div class="steps">
+    <div><h3>收訂金 <span class="sec">約 25 秒</span></h3><ol>
+      <li>輸入電話。老客戶自動帶出姓名。</li><li>輸入商品與總價。</li><li>輸入訂金金額。</li><li>點支付方式按鈕（現金／信用卡／轉帳…）。</li><li>按「建立」。畫面顯示單號，可直接列印收據。</li></ol></div>
+    <div><h3>客戶取貨 <span class="sec">約 15 秒</span></h3><ol>
+      <li>輸入電話後幾碼或單號，點開該單。</li><li>按「取貨結帳」。尾款金額已自動算好。</li><li>點尾款支付方式，按確認。</li></ol></div>
+    <div><h3>商品到貨 <span class="sec">約 10 秒</span></h3><ol>
+      <li>在「未結訂金」清單點開該單。</li><li>按「已到貨」；聯絡客戶後按「已通知」。日期自動填今天。</li></ol></div>
+  </div>
+  <h3>讓操作變快的設計</h3>
+  <ul>
+    <li>經手人、日期、單號、保留期限全部自動帶入，店員不用填。</li>
+    <li>支付方式用大按鈕。只有選「銀行轉帳」時才出現入金日與末五碼欄位。</li>
+    <li>品項明細可先只填一行摘要，之後再補細項，不擋住收款。</li>
+    <li>送出按鈕按下後立即鎖住，網路不穩重按也不會重複建單。</li>
+    <li>退訂與作廢需要經理 PIN，避免誤按。</li>
+  </ul>
+</section>
+
+<section>
+  <h2><span class="n">07</span>實施計畫</h2>
+  <figure>
+    <div class="wrap"><svg viewBox="0 0 860 200" role="img" aria-label="五個階段依序進行，約五週完成切換">
+      <g stroke="currentColor" stroke-width="1" opacity=".25">
+        <line x1="130" y1="24" x2="130" y2="190"/><line x1="272" y1="24" x2="272" y2="190"/><line x1="414" y1="24" x2="414" y2="190"/><line x1="556" y1="24" x2="556" y2="190"/><line x1="698" y1="24" x2="698" y2="190"/><line x1="840" y1="24" x2="840" y2="190"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle"><text x="201" y="16">第 1 週</text><text x="343" y="16">第 2 週</text><text x="485" y="16">第 3 週</text><text x="627" y="16">第 4 週</text><text x="769" y="16">第 5 週</text></g>
+      <g fill="currentColor" font-size="13"><text x="10" y="50">確認規格</text><text x="10" y="84">完成功能與測試</text><text x="10" y="118">匯入舊帳本</text><text x="10" y="152">新舊並行試用</text><text x="10" y="186">正式切換</text></g>
+      <g fill="currentColor" opacity=".55"><rect x="130" y="36" width="71" height="20" rx="3"/><rect x="414" y="104" width="71" height="20" rx="3"/><rect x="485" y="138" width="213" height="20" rx="3"/></g>
+      <rect x="165" y="70" width="249" height="20" rx="3" fill="#d9480f"/><rect x="698" y="172" width="71" height="20" rx="3" fill="#d9480f"/>
+    </svg></div>
+    <figcaption>週數為估計值，實際取決於規格確認的速度。並行期間舊帳本照常登記，兩邊數字一致後才切換。</figcaption>
+  </figure>
+  <div class="wrap"><table>
+    <tr><th>階段</th><th>內容</th><th>完成標準</th></tr>
+    <tr><td>確認規格</td><td>回覆第 08 節的待確認事項</td><td>欄位、單號格式、權限定案</td></tr>
+    <tr><td>完成功能與測試</td><td>補上品項明細、尾款、到貨與通知、月結表；自動測試</td><td>測試全數通過，可在測試用試算表操作</td></tr>
+    <tr><td>匯入舊帳本</td><td>805 筆轉入，保留原 No.；人員名稱統一</td><td>四個合計數字與舊帳本相同</td></tr>
+    <tr><td>新舊並行試用</td><td>店員實際操作，計時是否 30 秒內</td><td>每日日結與 POS、現金相符</td></tr>
+    <tr><td>正式切換</td><td>舊帳本改為唯讀封存</td><td>—</td></tr>
+  </table></div>
+  <h3>目前進度</h3>
+  <p><span class="tag ok">已寫好雛形</span> 建單與配號、多種支付方式、追加訂金、取貨沖銷、退訂（退款＋沒收）、作廢、未結清單、日結、收據、PIN 登入、異動紀錄、到期提醒信。</p>
+  <p><span class="tag w">尚未完成</span> 品項明細、尾款收款、到貨與通知狀態、含稅拆分、月結表、舊帳本匯入、備份。雛形也還沒有跑過測試，不能直接上線。</p>
+</section>
+
+<section>
+  <h2><span class="n">08</span>待確認事項</h2>
+  <div class="wrap"><table>
+    <tr><th>#</th><th>問題</th><th>我的建議</th></tr>
+    <tr><td>1</td><td>單號格式</td><td>採用 <code>DP-年月日-流水</code>，舊單保留原 No.</td></tr>
+    <tr><td>2</td><td>尾款是否也在本系統收款登記</td><td>要。未來不開發票時，這是唯一的完整紀錄</td></tr>
+    <tr><td>3</td><td>登入方式</td><td>每人一組 PIN，店內共用裝置也能分辨經手人</td></tr>
+    <tr><td>4</td><td>退訂、作廢的權限</td><td>限經理</td></tr>
+    <tr><td>5</td><td>舊帳本匯入範圍</td><td>805 筆全部匯入，未結的 53 筆可直接接續操作</td></tr>
+    <tr><td>6</td><td>支付方式清單</td><td>現金、信用卡、銀行轉帳、LINE Pay、街口支付、其他；可在設定表自行增減</td></tr>
+    <tr><td>7</td><td>期別（如 60 期）的起訖月份</td><td>請提供，月結表依期別彙總</td></tr>
+    <tr><td>8</td><td>帳本的「転記」與最右欄的「〇」各代表什麼確認</td><td>請說明，系統會做成對應的勾選欄</td></tr>
+  </table></div>
+</section>
+</main>
+</body>
+</html>
