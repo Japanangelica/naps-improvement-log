@@ -43,7 +43,15 @@ npm run serve     # 然後開啟 http://localhost:5174
 4. 同一頁的「Users」→「新增使用者」，輸入您自己的 Email 與密碼。這會是第一位經理。
 5. 左上齒輪「專案設定」→「您的應用程式」→ 按網頁圖示 `</>` → 輸入暱稱並勾選「同時設定 Firebase Hosting」→ 註冊。
 
-### 二、設定一鍵部署（只需做一次）
+### 二之一、在自己的 Windows 電腦部署（最簡單）
+
+1. 安裝 Node.js LTS 版：<https://nodejs.org>（安裝時全部按下一步）。
+2. 解壓縮專案，雙擊 `deposit-manager\deploy.bat`。
+3. 輸入專案 ID → 瀏覽器開啟後用 Google 帳號登入 → 等待完成，畫面會顯示網址。
+
+之後程式有更新時，下載新版再雙擊一次即可。這個方式不需要下面的 GitHub 金鑰設定。
+
+### 二之二、設定 GitHub 一鍵部署（選用，只需做一次）
 
 1. Firebase 主控台左上齒輪「專案設定」→「服務帳戶」→「產生新的私密金鑰」，會下載一個 JSON 檔。
 2. 同一頁點「管理服務帳戶權限」進入 Google Cloud 的 IAM 頁面，找到名稱含 `firebase-adminsdk` 的帳戶，新增角色「Firebase 管理員」。
