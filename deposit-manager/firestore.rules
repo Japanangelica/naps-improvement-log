@@ -10,6 +10,9 @@ service cloud.firestore {
     function myStaff() { return /databases/$(database)/documents/staff/$(request.auth.uid); }
     function isStaff() { return signedIn() && exists(myStaff()) && get(myStaff()).data.active == true; }
     function isManager() { return isStaff() && get(myStaff()).data.role == 'manager'; }
+    function isAccountant() { return isStaff() && get(myStaff()).data.role == 'accountant'; }
+    // 店員與經理可以收款、操作訂金單；會計只能查看與轉記。
+    function isSeller() { return isStaff() && get(myStaff()).data.role in ['staff', 'manager']; }
     function notInitialized() { return !exists(/databases/$(database)/documents/settings/main); }
     function mine(field) { return request.resource.data[field] == request.auth.uid; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
@@ -37,22 +40,24 @@ service cloud.firestore {
     // 每日流水號：只能從 1 開始、每次加 1。
     match /counters/{key} {
       allow read: if isStaff();
-      allow create: if isStaff() && request.resource.data.last == 1;
-      allow update: if isStaff() && request.resource.data.last == resource.data.last + 1;
+      allow create: if isSeller() && request.resource.data.last == 1;
+      allow update: if isSeller() && request.resource.data.last == resource.data.last + 1;
       allow delete: if false;
     }
 
     match /orders/{orderNo} {
       allow read: if isStaff();
-      allow create: if isStaff()
+      allow create: if isSeller()
         && request.resource.data.orderNo == orderNo
         && request.resource.data.status == 'active'
         && mine('createdByUid');
-      // 店員只能操作進行中的單，且只能維持進行中或結案；退訂、作廢、轉記與結案後的修正限經理。
+      // 店員只能操作進行中的單，且只能維持進行中或結案；退訂、作廢與結案後的修正限經理；
+      // 會計只能更改「已轉記」。
       allow update: if isStaff()
         && !changed().hasAny(['orderNo', 'createdAt', 'bizDate', 'createdBy', 'createdByUid'])
         && (isManager()
-            || (resource.data.status == 'active'
+            || (isAccountant() && changed().hasOnly(['posted']))
+            || (isSeller() && resource.data.status == 'active'
                 && request.resource.data.status in ['active', 'closed']
                 && !changed().hasAny(['posted', 'refunded', 'forfeited'])));
       allow delete: if false;
@@ -60,7 +65,7 @@ service cloud.firestore {
 
     match /transactions/{txId} {
       allow read: if isStaff();
-      allow create: if isStaff()
+      allow create: if isSeller()
         && request.resource.data.txId == txId
         && mine('staffUid')
         && request.resource.data.ts == request.time
@@ -77,7 +82,7 @@ service cloud.firestore {
     }
 
     match /audit/{id} {
-      allow read: if isManager();
+      allow read: if isManager() || isAccountant();
       allow create: if isStaff() && mine('staffUid') && request.resource.data.ts == request.time;
       allow update, delete: if false;
     }

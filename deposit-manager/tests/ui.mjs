@@ -63,7 +63,7 @@ try {
   await shot('6-closed');
 
   // 退訂：退 600、沒收 400
-  await act('home'); await page.fill('#q', '');
+  await act('back'); await page.fill('#q', '');
   await page.click('.order:has-text("陳小姐")');
   await page.waitForSelector('[data-act="mCancel"]');
   await act('mCancel');
@@ -97,9 +97,33 @@ try {
   await page.waitForSelector('[data-act="mClose"]');
   assert.equal(await page.locator('[data-act="mCancel"], [data-act="mVoid"]').count(), 0);
 
+  // 會計：預設進總表，只能轉記，不能收款
+  await act('logout');
+  await page.setViewportSize({ width: 1366, height: 800 });
+  await page.click('[data-act="demoLogin"][data-email="accountant@demo"]');
+  await page.waitForSelector('#sheet tbody tr');
+  assert.equal(await page.locator('#sheet tbody tr').count(), 4);
+  assert.equal(await page.locator('[data-act="tab"][data-v="home"]').count(), 0);
+  await page.check(`[data-post="${orderNo}"]`);
+  await page.waitForSelector('#toast:has-text("已標記轉記")');
+  await page.selectOption('#tStatus', 'unposted'); await act('tableLoad');
+  await page.waitForFunction(() => document.querySelectorAll('#sheet tbody tr').length === 3);
+  await page.selectOption('#tStatus', 'all'); await act('tableLoad');
+  await page.waitForFunction(() => document.querySelectorAll('#sheet tbody tr').length === 4);
+  await page.fill('#tq', 'shoei');
+  assert.equal(await page.locator('#sheet tbody tr').count(), 1);
+  await page.fill('#tq', '');
+  await shot('10-sheet');
+  await page.click(`#sheet tr[data-no="${orderNo}"] td:nth-child(3)`);
+  await page.waitForSelector('[data-act="posted"]');
+  assert.equal(await page.locator('[data-act="mClose"], [data-act="mPay"], [data-act="mVoid"], [data-act="edit"]').count(), 0);
+  await shot('11-detail-desktop');
+  await act('back'); await page.waitForSelector('#sheet tbody tr');
+  await act('logout');
+  await page.click('[data-act="demoLogin"][data-email="staff@demo"]');
+
   // 桌面寬度截圖
-  await page.setViewportSize({ width: 1100, height: 800 });
-  await act('home'); await page.waitForSelector('.order'); await shot('9-desktop');
+  await page.waitForSelector('.order'); await shot('9-desktop');
   assert.deepEqual(errors, []);
   console.log('UI 流程測試通過');
 } finally { await browser.close(); server.kill(); }

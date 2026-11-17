@@ -7,18 +7,22 @@
 
 ## 功能
 
-| 對象 | 功能 |
+| 角色 | 可以做的事 |
 | --- | --- |
-| 店員 | 收訂金（自動配號）、追加訂金、標記到貨／已通知、取貨結帳（收尾款）、修改資料、搜尋、列印收據、日結報表 |
-| 經理 | 以上全部，加上退訂（退還＋沒收）、作廢、標記轉記、人員管理、店鋪設定、匯出 CSV、資料檢查 |
+| 店員 | 收訂金（自動配號）、追加訂金、標記到貨／已通知、取貨結帳（收尾款）、修改資料、搜尋、總表、列印收據、報表 |
+| 會計 | 總表（接近 Excel 的排版）、勾選「已轉記」、報表、匯出 CSV。不能收款或修改訂金單 |
+| 經理 | 店員與會計的全部功能，加上退訂（退還＋沒收）、作廢、人員管理、店鋪設定、資料檢查 |
+
+「設定」可切換是否另外開立發票：開啟時顯示發票號碼欄位，關閉時只用本系統的收據編號。
 
 ## 驗證狀態
 
 | 項目 | 狀態 |
 | --- | --- |
-| 金額運算與業務流程（`npm test`，12 項） | 通過 |
-| 瀏覽器實際操作流程（`npm run test:ui`，示範模式） | 通過 |
+| 金額運算與業務流程（`npm test`，13 項） | 通過 |
+| 瀏覽器實際操作流程（`npm run test:ui`，示範模式，手機與電腦寬度） | 通過 |
 | 連接 Firebase（`js/store-firebase.js`）與安全規則（`firestore.rules`） | **尚未驗證**，需建立 Firebase 專案後實機測試 |
+| 自動部署（`.github/workflows/deploy-deposit-manager.yml`） | **尚未驗證**，第一次執行時確認 |
 | 舊帳本匯入 | 尚未製作 |
 
 ## 先試用（示範模式）
@@ -39,16 +43,25 @@ npm run serve     # 然後開啟 http://localhost:5174
 4. 同一頁的「Users」→「新增使用者」，輸入您自己的 Email 與密碼。這會是第一位經理。
 5. 左上齒輪「專案設定」→「您的應用程式」→ 按網頁圖示 `</>` → 輸入暱稱並勾選「同時設定 Firebase Hosting」→ 註冊。
 
-### 二、部署（需要一台有 Node.js 的電腦）
+### 二、設定一鍵部署（只需做一次）
+
+1. Firebase 主控台左上齒輪「專案設定」→「服務帳戶」→「產生新的私密金鑰」，會下載一個 JSON 檔。
+2. 同一頁點「管理服務帳戶權限」進入 Google Cloud 的 IAM 頁面，找到名稱含 `firebase-adminsdk` 的帳戶，新增角色「Firebase 管理員」。
+3. 到 GitHub 儲存庫的 Settings → Secrets and variables → Actions → New repository secret：
+   名稱填 `FIREBASE_SERVICE_ACCOUNT`，內容貼上整個 JSON 檔的文字。
+4. 這個 JSON 檔等同管理員鑰匙，貼完後請從電腦刪除，不要傳給任何人。
+
+之後每次把 PR 按「Merge」合併到 main，就會自動測試並部署；也可以到 Actions 頁面手動按「Run workflow」。
+部署完成後網址是 `https://<專案 ID>.web.app`。
+
+不想用自動部署時，也可以在有 Node.js 的電腦上執行：
 
 ```
 npm install -g firebase-tools
 firebase login
 cd deposit-manager
-firebase deploy --project <專案 ID>
+firebase deploy --only hosting,firestore:rules --project <專案 ID>
 ```
-
-完成後會顯示網址（`https://<專案 ID>.web.app`）。
 
 ### 三、第一次登入
 

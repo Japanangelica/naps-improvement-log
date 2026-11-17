@@ -241,31 +241,41 @@
   </figure>
   <div class="wrap"><table>
     <tr><th>階段</th><th>內容</th><th>完成標準</th></tr>
-    <tr><td>確認規格</td><td>回覆第 08 節的待確認事項</td><td>欄位、單號格式、權限定案</td></tr>
+    <tr><td>確認規格</td><td>確認第 08 節的事項</td><td>欄位、單號格式、權限定案</td></tr>
     <tr><td>完成功能與測試</td><td>建立 Firebase 專案；撰寫畫面、資料存取、安全規則；模擬器自動測試</td><td>測試全數通過，可用測試網址操作</td></tr>
     <tr><td>匯入舊帳本</td><td>805 筆轉入，保留原 No.；人員名稱統一</td><td>四個合計數字與舊帳本相同</td></tr>
     <tr><td>新舊並行試用</td><td>店員實際操作，計時是否 30 秒內</td><td>每日日結與 POS、現金相符</td></tr>
     <tr><td>正式切換</td><td>舊帳本改為唯讀封存</td><td>—</td></tr>
   </table></div>
   <h3>目前進度</h3>
-  <p><span class="tag ok">已完成並測試</span> 收訂金與配號、追加訂金、到貨與通知、取貨結帳（含尾款）、退訂（退還＋沒收）、作廢、品項明細、含稅拆分、日結與期間報表、匯出、人員與設定、資料檢查、收據。以示範模式通過自動測試與瀏覽器流程測試。</p>
-  <p><span class="tag w">尚未驗證</span> 連接真正 Firebase 的部分與安全規則已寫好，但開發環境無法連到 Firebase，需等專案建立後實機驗證。</p>
+  <p><span class="tag ok">已完成並測試</span> 收訂金與配號、追加訂金、到貨與通知、取貨結帳（含尾款）、退訂、作廢、品項明細、含稅拆分、總表（Excel 風格、可查已結案）、會計角色與轉記、發票開關、報表、匯出、人員與設定、資料檢查、收據；手機與電腦版面。以示範模式通過 13 項自動測試與瀏覽器流程測試。</p>
+  <p><span class="tag w">尚未驗證</span> 連接真正 Firebase 的部分、安全規則、自動部署流程。開發環境無法連到 Firebase，需等專案建立後實機驗證。</p>
   <p><span class="tag w">尚未開始</span> 舊帳本 805 筆匯入。</p>
+  <h3>上線前的步驟</h3>
+  <ol>
+    <li>您：試用示範版，回饋要調整的地方。</li>
+    <li>您：建立 Firebase 專案，並把部署金鑰存到 GitHub（一次性設定，步驟在 README）。</li>
+    <li>您：在 PR 按「Merge」。系統自動測試並部署，這就是之後每次更新的一鍵動作。</li>
+    <li>我：實機驗證登入、收款、權限與安全規則，修正發現的問題。</li>
+    <li>我：製作舊帳本匯入，核對四個合計數字與 Excel 相同。</li>
+    <li>店內：新舊並行約兩週，日結與 POS、現金相符後正式切換。</li>
+  </ol>
 </section>
 
 <section>
-  <h2><span class="n">08</span>待確認事項</h2>
+  <h2><span class="n">08</span>已確認與待確認事項</h2>
   <div class="wrap"><table>
-    <tr><th>#</th><th>問題</th><th>我的建議</th></tr>
-    <tr><td>1</td><td>單號格式</td><td>採用 <code>DP-年月日-流水</code>，舊單保留原 No.</td></tr>
-    <tr><td>2</td><td>尾款是否也在本系統收款登記</td><td>要。未來不開發票時，這是唯一的完整紀錄</td></tr>
-    <tr><td>3</td><td>登入方式</td><td>每人一組帳號與 6 位數密碼；店內共用裝置上點選姓名後輸入密碼即可切換</td></tr>
-    <tr><td>4</td><td>退訂、作廢的權限</td><td>限經理</td></tr>
-    <tr><td>5</td><td>舊帳本匯入範圍</td><td>805 筆全部匯入，未結的 53 筆可直接接續操作</td></tr>
-    <tr><td>6</td><td>支付方式清單</td><td>現金、信用卡、銀行轉帳、LINE Pay、街口支付、其他；可在設定頁自行增減</td></tr>
-    <tr><td>7</td><td>期別（如 60 期）的起訖月份</td><td>請提供，月結表依期別彙總</td></tr>
-    <tr><td>8</td><td>帳本的「転記」與最右欄的「〇」各代表什麼確認</td><td>請說明，系統會做成對應的勾選欄</td></tr>
-    <tr><td>9</td><td>Firebase 專案由誰的 Google 帳號建立</td><td>用店家共用或您的帳號建立（約 5 分鐘，我會提供步驟），資料庫地區選台灣（asia-east1）</td></tr>
+    <tr><th>項目</th><th>結論</th><th>狀態</th></tr>
+    <tr><td>尾款</td><td>在本系統登記收款與支付方式</td><td><span class="tag ok">已確認</span></td></tr>
+    <tr><td>転記欄</td><td>會計把資料抄到自己的帳本後勾選；新增「會計」角色，只能查看、轉記、匯出</td><td><span class="tag ok">已確認</span></td></tr>
+    <tr><td>發票</td><td>目前先在 POS 開發票，日後可能不開。設定頁可切換，兩種方式都支援</td><td><span class="tag ok">已確認</span></td></tr>
+    <tr><td>查詢與排版</td><td>「總表」分頁採接近 Excel 的格線表格，可查已結案的單、依欄位排序、下載</td><td><span class="tag ok">已確認</span></td></tr>
+    <tr><td>裝置</td><td>電腦為主，手機也可使用</td><td><span class="tag ok">已確認</span></td></tr>
+    <tr><td>單號格式</td><td><code>DP-年月日-流水</code>，舊單保留原 No.</td><td><span class="tag w">照建議先做</span></td></tr>
+    <tr><td>退訂、作廢權限</td><td>限經理</td><td><span class="tag w">照建議先做</span></td></tr>
+    <tr><td>舊帳本匯入範圍</td><td>805 筆全部匯入</td><td><span class="tag w">待確認</span></td></tr>
+    <tr><td>帳本最右欄的「〇」</td><td>用途不明，尚未製作</td><td><span class="tag w">待確認</span></td></tr>
+    <tr><td>Firebase 專案</td><td>用店家共用或您的 Google 帳號建立，地區選台灣</td><td><span class="tag w">待您操作</span></td></tr>
   </table></div>
 </section>
 </main>

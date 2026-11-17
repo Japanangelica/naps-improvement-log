@@ -10,7 +10,11 @@ const money = n => '$' + Number(n || 0).toLocaleString('en-US');
 const REMEMBER_KEY = 'deposit-accounts', DEMO_KEY = 'deposit-demo-v1';
 
 const S = { store: null, auth: null, ops: null, user: null, settings: L.DEFAULT_SETTINGS, open: [], unsub: null,
-  view: 'home', filter: 'all', q: '', history: null, cur: null, edit: null, report: null };
+  view: 'home', back: 'home', filter: 'all', q: '', history: null, cur: null, edit: null,
+  table: { status: 'all', from: '', to: '', q: '', rows: null, sort: 'orderNo', desc: true } };
+const canSell = () => S.user.role !== 'accountant';
+const canPost = () => S.user.role === 'manager' || S.user.role === 'accountant';
+const inv = () => S.settings.useInvoice !== false;
 
 /* ---------- 共用 ---------- */
 
@@ -94,6 +98,7 @@ async function seedDemo() {
   if ((await S.store.query('staff')).length) return;
   await S.store.set('staff', 'demo-manager', { uid: 'demo-manager', name: '示範經理', email: 'manager@demo', role: 'manager', active: true });
   await S.store.set('staff', 'demo-staff', { uid: 'demo-staff', name: '示範店員', email: 'staff@demo', role: 'staff', active: true });
+  await S.store.set('staff', 'demo-accountant', { uid: 'demo-accountant', name: '示範會計', email: 'accountant@demo', role: 'accountant', active: true });
   await S.store.set('settings', 'main', L.DEFAULT_SETTINGS);
   S.user = { uid: 'demo-manager', name: '示範經理', role: 'manager' };
   const today = L.twNow().date, mk = (customer, phone, name, spec, price, amount, method, hold) => S.ops.createOrder({
@@ -120,12 +125,13 @@ async function onAuth(u) {
   S.unsub = S.store.listen('orders', [['status', '==', 'active']], rows => {
     S.open = rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     if (S.view === 'home') renderList();
+    if (S.view === 'table' && S.table.status === 'open') renderSheet();
   }, e => toast(e.message, true));
   $('#login').classList.add('hide'); $('#login').innerHTML = ''; $('#app').classList.remove('hide');
   $('#shop').textContent = S.settings.shopName; document.title = S.settings.shopName + ' 訂金管理';
   $('#who').textContent = `${staff.name}（${L.ROLE_LABEL[staff.role]}）`;
   $('#demoBar').classList.toggle('hide', !S.store.demo);
-  go('home');
+  go(canSell() ? 'home' : 'table');
 }
 
 function remembered() { try { return JSON.parse(localStorage.getItem(REMEMBER_KEY)) || []; } catch { return []; } }
@@ -146,7 +152,8 @@ function renderLogin() {
   if (S.store.demo) {
     return loginShell(`<p>目前是<b>示範模式</b>，可以自由試用，資料不會上傳。</p>
       <button class="btn pri big" data-act="demoLogin" data-email="manager@demo">以示範經理登入</button>
-      <button class="btn big" style="margin-top:10px" data-act="demoLogin" data-email="staff@demo">以示範店員登入</button>`);
+      <button class="btn big" style="margin-top:10px" data-act="demoLogin" data-email="staff@demo">以示範店員登入</button>
+      <button class="btn big" style="margin-top:10px" data-act="demoLogin" data-email="accountant@demo">以示範會計登入</button>`);
   }
   const acc = remembered();
   loginShell(`${acc.length ? `<label class="f" style="margin-bottom:4px"><span>點選自己的名字</span></label>
@@ -172,11 +179,13 @@ function renderBlocked(u) {
 
 function go(view, arg) {
   S.view = view;
-  const tabs = [['home', '訂金單'], ['report', '報表']].concat(S.user.role === 'manager' ? [['settings', '設定']] : []);
-  const cur = view === 'form' || view === 'detail' || view === 'done' ? 'home' : view;
+  if (view === 'home' || view === 'table') S.back = view;
+  const tabs = (canSell() ? [['home', '訂金單']] : []).concat([['table', '總表'], ['report', '報表']], S.user.role === 'manager' ? [['settings', '設定']] : []);
+  const cur = view === 'form' || view === 'detail' || view === 'done' ? S.back : view;
+  $('#view').classList.toggle('wide', view === 'table');
   $('#tabs').innerHTML = tabs.map(t => `<button data-act="tab" data-v="${t[0]}" class="${t[0] === cur ? 'on' : ''}">${t[1]}</button>`).join('');
   window.scrollTo(0, 0);
-  ({ home: renderHome, form: renderForm, detail: renderDetail, done: renderDone, report: renderReport, settings: renderSettings })[view](arg);
+  ({ home: renderHome, table: renderTable, form: renderForm, detail: renderDetail, done: renderDone, report: renderReport, settings: renderSettings })[view](arg);
 }
 
 /* ---------- 首頁：未取貨清單 ---------- */
@@ -246,7 +255,7 @@ function renderForm(edit) {
     ${edit ? '' : `<div class="card"><h3>③ 訂金</h3>
       ${field('訂金金額', '<input id="fAmt" type="number" inputmode="numeric" min="1">')}
       <div class="opts"><button type="button" class="opt sm" data-act="quick" data-v="1">付全額</button><button type="button" class="opt sm" data-act="quick" data-v="0.5">付一半</button></div>
-      ${payFields()}${field('訂金發票號碼', '<input id="fInv" autocomplete="off" maxlength="20">', '選填')}</div>`}
+      ${payFields()}${inv() ? field('訂金發票號碼', '<input id="fInv" autocomplete="off" maxlength="20">', '選填') : ''}</div>`}
     <details class="card"${edit ? ' open' : ''}><summary style="font-weight:700;cursor:pointer">其他資料（選填）</summary><div style="margin-top:12px">
       <label class="f" style="margin-bottom:4px"><span>來源</span></label>${options('source', S.settings.sources, o.source)}
       <div class="grid2">${field('預計到貨日', `<input id="fExp" type="date" value="${esc(o.expectedDate)}">`)}
@@ -296,7 +305,7 @@ function txTable(txs, withOrder) {
 
 function renderDetail(v) {
   S.cur = v;
-  const o = v.order, active = o.status === 'active', mgr = S.user.role === 'manager';
+  const o = v.order, active = o.status === 'active', mgr = S.user.role === 'manager', sell = canSell();
   const stageIdx = active ? ['ordered', 'arrived', 'notified'].indexOf(o.stage) : (o.status === 'closed' ? 3 : -1);
   const steps = ['已收訂金', '已到貨', '已通知客戶', '已取貨'].map((s, i) => `<div class="${i <= stageIdx ? 'done' : ''}">${s}</div>`).join('');
   const box = (label, val, hl) => `<div class="${hl ? 'hl' : ''}"><span class="mute">${label}</span><b class="num">${val}</b></div>`;
@@ -307,25 +316,25 @@ function renderDetail(v) {
   const next = { ordered: ['arrived', '商品到貨了'], arrived: ['notified', '已通知客戶來取貨'] }[o.stage];
   const prev = { arrived: ['ordered', '待到貨'], notified: ['arrived', '已到貨'] }[o.stage];
   const dd = (k, val) => (val ? `<dt>${k}</dt><dd>${val}</dd>` : '');
-  $('#view').innerHTML = `<div class="row" style="margin-bottom:10px"><button class="btn ghost" data-act="home">← 返回</button></div>
+  $('#view').innerHTML = `<div class="row" style="margin-bottom:10px"><button class="btn ghost" data-act="back">← 返回</button></div>
     <div class="card"><div class="row"><span class="mono" style="font-size:24px;font-weight:800;flex:1">${esc(o.orderNo)}</span>
         <span class="pill ${active ? o.stage : o.status}" style="font-size:15px">${active ? L.STAGE_LABEL[o.stage] : L.STATUS_LABEL[o.status]}</span></div>
       <div style="font-size:18px;font-weight:700;margin-top:6px">${esc(o.customer)} <span class="mute num">${esc(o.phone)}</span></div>
       ${o.status === 'closed' || active ? `<div class="steps">${steps}</div>` : ''}<div class="money">${moneyRow}</div>
-      ${active ? `${next ? `<button class="btn pri big" data-act="stage" data-v="${next[0]}">${next[1]}</button>` : ''}
+      ${active && sell ? `${next ? `<button class="btn pri big" data-act="stage" data-v="${next[0]}">${next[1]}</button>` : ''}
         <button class="btn ${next ? '' : 'pri '}big" style="margin-top:10px" data-act="mClose">客戶取貨結帳</button>` : ''}
-      <div class="row" style="margin-top:12px">${active ? '<button class="btn" data-act="mPay">追加訂金</button><button class="btn" data-act="edit">修改資料</button>' : ''}
+      <div class="row" style="margin-top:12px">${active && sell ? '<button class="btn" data-act="mPay">追加訂金</button><button class="btn" data-act="edit">修改資料</button>' : ''}
         <button class="btn" data-act="print">列印收據</button>
-        ${active && prev ? `<button class="btn ghost" data-act="stage" data-v="${prev[0]}">改回「${prev[1]}」</button>` : ''}</div>
-      ${mgr ? `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)"><span class="mute">經理功能</span>
-        ${active ? '<button class="btn danger" data-act="mCancel">退訂</button>' : ''}
-        ${o.status !== 'void' ? '<button class="btn danger" data-act="mVoid">作廢</button>' : ''}
-        <button class="btn" data-act="posted">${o.posted ? '✓ 已轉記（點此取消）' : '標記為已轉記'}</button></div>` : ''}</div>
+        ${active && sell && prev ? `<button class="btn ghost" data-act="stage" data-v="${prev[0]}">改回「${prev[1]}」</button>` : ''}</div>
+      ${canPost() ? `<div class="row" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)"><span class="mute">${mgr ? '經理功能' : '會計功能'}</span>
+        ${mgr && active ? '<button class="btn danger" data-act="mCancel">退訂</button>' : ''}
+        ${mgr && o.status !== 'void' ? '<button class="btn danger" data-act="mVoid">作廢</button>' : ''}
+        <button class="btn" data-act="posted">${o.posted ? '✓ 會計已轉記（點此取消）' : '標記為會計已轉記'}</button></div>` : (o.posted ? '<p class="mute" style="margin:10px 0 0">✓ 會計已轉記</p>' : '')}</div>
     <div class="card"><h3>商品</h3><div class="scroll"><table><tr><th>品名</th><th>尺寸／顏色</th><th class="r">數量</th><th class="r">單價</th><th class="r">小計</th></tr>${o.items.map(it =>
       `<tr><td class="w">${esc(it.name)}</td><td>${esc(it.spec)}</td><td class="r num">${it.qty}</td><td class="r num">${it.price ? money(it.price) : '未定'}</td><td class="r num">${it.price ? money(it.qty * it.price) : ''}</td></tr>`).join('')}</table></div></div>
     <div class="card"><h3>資料</h3><dl>${dd('來源', esc(o.source))}${dd('預計到貨', esc(o.expectedDate))}${dd('保留期限', esc(o.holdUntil) + (L.isOverdue(o, L.twNow().date) ? ' <span class="pill over">已過期限</span>' : ''))}
       ${dd('到貨日', esc(o.arrivedAt))}${dd('通知日', esc(o.notifiedAt))}${dd('結案', o.closedAt ? `${esc(o.closedAt.slice(0, 16))}　${esc(o.closedBy)}` : '')}
-      ${dd('訂金發票', esc(o.depositInvoice))}${dd('結帳發票', esc(o.finalInvoice))}${dd('舊帳本 No.', esc(o.legacyNo))}${dd('備註', esc(o.note))}
+      ${dd('支付方式', esc(o.payMethods))}${dd('訂金發票', esc(o.depositInvoice))}${dd('結帳發票', esc(o.finalInvoice))}${dd('舊帳本 No.', esc(o.legacyNo))}${dd('備註', esc(o.note))}
       ${dd('建立', `${esc(o.createdAt.slice(0, 16))}　${esc(o.createdBy)}`)}</dl></div>
     <div class="card"><h3>收付紀錄</h3>${txTable(v.txs)}</div>`;
 }
@@ -333,7 +342,7 @@ function renderDetail(v) {
 const MODALS = {
   mPay() {
     openModal(`<h2>追加訂金</h2>${field('金額', '<input id="mAmt" type="number" inputmode="numeric" min="1">')}${payFields()}
-      ${field('發票號碼', '<input id="mInv" maxlength="20">', '選填')}
+      ${inv() ? field('發票號碼', '<input id="mInv" maxlength="20">', '選填') : ''}
       <button class="btn pri big" data-act="doPay">確認收款</button><button class="btn ghost" style="width:100%" data-act="closeModal">取消</button>`);
   },
   mClose() {
@@ -342,7 +351,7 @@ const MODALS = {
       ${field('商品總價', `<input id="mTotal" type="number" inputmode="numeric" min="1" value="${o.totalPrice || ''}">`, o.totalPrice ? '有變動可直接修改' : '請輸入最後的總價')}
       <div class="money" style="grid-template-columns:1fr 1fr"><div><span class="mute">訂金折抵</span><b class="num">−${money(o.held)}</b></div>
         <div class="hl"><span class="mute">這次要收的尾款</span><b class="num" id="mTail"></b></div></div>
-      <div id="mTailPay">${payFields()}</div>${field('結帳發票號碼', '<input id="mInv" maxlength="20">', '選填')}
+      <div id="mTailPay">${payFields()}</div>${inv() ? field('結帳發票號碼', '<input id="mInv" maxlength="20">', '選填') : ''}
       <button class="btn pri big" data-act="doClose">確認結帳</button><button class="btn ghost" style="width:100%" data-act="closeModal">取消</button>`);
     updateTail();
   },
@@ -392,7 +401,7 @@ function renderReport() {
       <div class="opts">${[['today', '今天'], ['yesterday', '昨天'], ['month', '本月'], ['lastMonth', '上月']].map(r => `<button class="opt sm" data-act="range" data-v="${r[0]}">${r[1]}</button>`).join('')}</div>
       <div class="grid2">${field('開始', `<input id="rFrom" type="date" value="${today}">`)}${field('結束', `<input id="rTo" type="date" value="${today}">`)}</div>
       <button class="btn pri" data-act="report">查詢</button></div><div id="rOut"></div>
-    ${S.user.role === 'manager' ? `<div class="card"><h3>匯出備份</h3><p class="mute">下載全部資料，可用 Excel 開啟。建議每週一次，存到雲端硬碟。</p>
+    ${canPost() ? `<div class="card"><h3>匯出備份</h3><p class="mute">下載全部資料，可用 Excel 開啟。建議每週一次，存到雲端硬碟。</p>
       <button class="btn" data-act="export">下載訂金單與收付明細</button></div>` : ''}`;
   loadReport();
 }
@@ -420,7 +429,7 @@ async function loadReport(btn) {
 
 const ORDER_COLS = [['orderNo', '單號'], [o => L.STATUS_LABEL[o.status], '狀態'], [o => (o.status === 'active' ? L.STAGE_LABEL[o.stage] : ''), '階段'], ['createdAt', '建立時間'],
   ['customer', '客戶'], ['phone', '電話'], ['source', '來源'], ['itemsText', '商品'], ['totalPrice', '商品總價'], ['deposit', '已收訂金'], ['tail', '尾款'],
-  ['refunded', '已退款'], ['forfeited', '已沒收'], ['held', '未結訂金'], ['expectedDate', '預計到貨'], ['holdUntil', '保留期限'], ['arrivedAt', '到貨日'],
+  ['refunded', '已退款'], ['forfeited', '已沒收'], ['held', '未結訂金'], ['payMethods', '支付方式'], ['expectedDate', '預計到貨'], ['holdUntil', '保留期限'], ['arrivedAt', '到貨日'],
   ['notifiedAt', '通知日'], ['closedAt', '結案時間'], ['closedBy', '結案人員'], ['depositInvoice', '訂金發票'], ['finalInvoice', '結帳發票'], ['legacyNo', '舊帳本No'],
   [o => (o.posted ? '是' : ''), '已轉記'], ['createdBy', '建立人'], ['note', '備註']];
 const TX_COLS = [['txId', '收據編號'], ['orderNo', '單號'], ['customer', '客戶'], ['time', '時間'], ['bizDate', '營業日'], [x => L.TYPE_LABEL[x.type], '類型'], ['method', '支付方式'],
@@ -432,12 +441,13 @@ async function renderSettings() {
   const s = S.settings;
   $('#view').innerHTML = `<div id="formErr"></div><div class="card"><h2>人員</h2><div id="staffList" class="mute">載入中…</div>
       <h3 style="margin-top:16px">新增人員</h3><div class="grid2">${field('姓名', '<input id="sName">')}${field('Email', '<input id="sEmail" type="email" autocomplete="off">', '登入用')}
-      ${field('密碼', '<input id="sPass" type="text" autocomplete="off">', '至少 6 個字')}${field('角色', '<select id="sRole"><option value="staff">店員</option><option value="manager">經理</option></select>')}</div>
+      ${field('密碼', '<input id="sPass" type="text" autocomplete="off">', '至少 6 個字')}${field('角色', '<select id="sRole"><option value="staff">店員</option><option value="accountant">會計（只能查看、轉記、匯出）</option><option value="manager">經理</option></select>')}</div>
       <button class="btn pri" data-act="addStaff">新增</button></div>
     <div class="card"><h2>店鋪設定</h2>${field('店名', `<input id="cShop" value="${esc(s.shopName)}">`)}
       ${field('支付方式', `<input id="cMethods" value="${esc(s.methods.join('、'))}">`, '用「、」分隔；名稱含「轉帳」會多問入金日')}
       ${field('來源', `<input id="cSources" value="${esc(s.sources.join('、'))}">`, '用「、」分隔')}
       ${field('預設保留天數', `<input id="cHold" type="number" min="0" value="${esc(s.holdDays)}">`, '0 表示不預設')}
+      ${field('是否另外開立發票', `<select id="cInv"><option value="1"${inv() ? ' selected' : ''}>是，顯示發票號碼欄位</option><option value="0"${inv() ? '' : ' selected'}>否，只用本系統的收據</option></select>`)}
       ${field('收據條款', `<textarea id="cTerms">${esc(s.terms)}</textarea>`)}<button class="btn pri" data-act="saveSettings">儲存設定</button></div>
     <div class="card"><h2>資料檢查</h2><p class="mute">用收付明細重新加總每張單，確認金額一致。</p><button class="btn" data-act="integrity">開始檢查</button><div id="chkOut" style="margin-top:10px"></div></div>`;
   try {
@@ -452,11 +462,75 @@ async function renderSettings() {
 
 /* ---------- 動作 ---------- */
 
+/* ---------- 總表（接近 Excel 帳本的排版） ---------- */
+
+const statusText = o => (o.status === 'active' ? L.STAGE_LABEL[o.stage] : L.STATUS_LABEL[o.status]);
+// [標題, 取值, 是否為數字, 是否只在開立發票時顯示]
+const SHEET_COLS = [
+  ['單號', o => o.orderNo], ['受注日', o => o.bizDate], ['客戶姓名', o => o.customer], ['電話', o => o.phone],
+  ['商品內容', o => o.itemsText], ['商品總價', o => o.totalPrice, true], ['受注人員', o => o.createdBy], ['支付方式', o => o.payMethods || ''],
+  ['訂金', o => o.deposit, true], ['訂金發票', o => o.depositInvoice, false, true], ['到貨日', o => o.arrivedAt], ['狀況', statusText],
+  ['結案日', o => o.closedAt.slice(0, 10)], ['結案人員', o => o.closedBy], ['尾款', o => o.tail, true], ['退款', o => o.refunded, true],
+  ['沒收', o => o.forfeited, true], ['未結訂金', o => o.held, true], ['結帳發票', o => o.finalInvoice, false, true], ['備註', o => o.note]
+];
+const sheetCols = () => SHEET_COLS.filter(c => !c[3] || inv());
+
+function renderTable() {
+  const t = S.table, today = L.twNow().date;
+  if (!t.from) { t.from = today.slice(0, 8) + '01'; t.to = today; }
+  $('#view').innerHTML = `<div class="card"><div class="row" style="align-items:flex-end">
+      <label class="f" style="margin:0"><span>狀態</span><select id="tStatus" style="width:auto">${[['all', '全部'], ['open', '未取貨（不限日期）'], ['closed', '已取貨'], ['refunded', '已退訂'], ['void', '已作廢'], ['unposted', '會計未轉記']]
+        .map(s => `<option value="${s[0]}"${t.status === s[0] ? ' selected' : ''}>${s[1]}</option>`).join('')}</select></label>
+      <label class="f" style="margin:0"><span>受注日 從</span><input id="tFrom" type="date" value="${t.from}" style="width:auto"></label>
+      <label class="f" style="margin:0"><span>到</span><input id="tTo" type="date" value="${t.to}" style="width:auto"></label>
+      <button class="btn pri" data-act="tableLoad">查詢</button>
+      <div class="opts" style="margin:0">${[['month', '本月'], ['lastMonth', '上月'], ['year', '今年']].map(r => `<button class="opt sm" data-act="tableRange" data-v="${r[0]}">${r[1]}</button>`).join('')}</div>
+      <input id="tq" type="search" placeholder="在結果中篩選：姓名、電話、商品、單號、發票" value="${esc(t.q)}" style="flex:1;min-width:220px" aria-label="在結果中篩選">
+      <button class="btn" data-act="tableCsv">下載這份表</button></div></div>
+    <div id="sheetSum"></div><div class="sheet" id="sheet"><div class="empty">載入中…</div></div>`;
+  loadTable();
+}
+
+async function loadTable(btn) {
+  const t = S.table;
+  t.status = $('#tStatus').value; t.from = $('#tFrom').value; t.to = $('#tTo').value;
+  if (t.status !== 'open' && (!t.from || !t.to || t.from > t.to)) return toast('請確認開始與結束日期', true);
+  const job = async () => { t.rows = t.status === 'open' ? null : await S.ops.listOrders(t.from, t.to); renderSheet(); };
+  if (btn) await run(btn, job); else await job().catch(e => toast(e.message, true));
+}
+
+function sheetRows() {
+  const t = S.table, q = t.q.trim().toLowerCase(), cols = sheetCols();
+  let rows = t.status === 'open' ? S.open : (t.rows || []);
+  if (t.status === 'unposted') rows = rows.filter(o => !o.posted && o.status !== 'void');
+  else if (t.status !== 'all' && t.status !== 'open') rows = rows.filter(o => o.status === t.status);
+  if (q) rows = rows.filter(o => cols.map(c => c[1](o)).join(' ').toLowerCase().includes(q));
+  const col = cols.find(c => c[0] === t.sort) || cols[0];
+  return [...rows].sort((a, b) => { const x = col[1](a), y = col[1](b); return (x < y ? -1 : x > y ? 1 : 0) * (t.desc ? -1 : 1); });
+}
+
+function renderSheet() {
+  if (!$('#sheet')) return;
+  const t = S.table, cols = sheetCols(), rows = sheetRows(), sum = L.ledgerTotals(rows);
+  $('#sheetSum').innerHTML = `<div class="money" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+    <div><span class="mute">筆數（不含作廢）</span><b class="num">${sum.count}</b></div><div><span class="mute">訂金總計</span><b class="num">${money(sum.deposit)}</b></div>
+    <div><span class="mute">已結帳折抵</span><b class="num">${money(sum.settled)}</b></div><div><span class="mute">退訂（退款＋沒收）</span><b class="num">${money(sum.cancelled)}</b></div>
+    <div class="hl"><span class="mute">未結訂金</span><b class="num">${money(sum.open)}</b></div></div>`;
+  $('#sheet').innerHTML = rows.length ? `<table><thead><tr><th>轉記</th>${cols.map(c =>
+      `<th class="${c[2] ? 'r' : ''}"><button data-act="tableSort" data-v="${c[0]}">${c[0]}${t.sort === c[0] ? (t.desc ? ' ▼' : ' ▲') : ''}</button></th>`).join('')}</tr></thead><tbody>${rows.map(o =>
+      `<tr class="${o.status === 'void' ? 'voided' : ''}" data-no="${esc(o.orderNo)}"><td class="c">${canPost()
+        ? `<input type="checkbox" data-post="${esc(o.orderNo)}"${o.posted ? ' checked' : ''} aria-label="會計已轉記">` : (o.posted ? '✓' : '')}</td>${cols.map((c, i) => {
+        const v = c[1](o);
+        return `<td class="${c[2] ? 'r num' : ''}${i === 0 ? ' mono' : ''}">${c[2] ? (v ? money(v) : '') : esc(v)}</td>`;
+      }).join('')}</tr>`).join('')}</tbody></table>` : '<div class="empty">這個條件下沒有訂金單</div>';
+}
+
 const reload = async order => go('detail', await S.ops.getOrder(order.orderNo));
 
 const ACT = {
   tab: el => go(el.dataset.v),
   home: () => go('home'),
+  back: () => go(S.back),
   new: () => go('form'),
   logout: () => S.auth.signOut(),
   closeModal,
@@ -480,6 +554,14 @@ const ACT = {
     await onAuth({ uid, email: el.dataset.email });
   }),
 
+  tableLoad: el => loadTable(el),
+  tableRange: el => {
+    const today = L.twNow().date, first = today.slice(0, 8) + '01', lastPrev = L.addDays(first, -1);
+    const [from, to] = { month: [first, today], lastMonth: [lastPrev.slice(0, 8) + '01', lastPrev], year: [today.slice(0, 5) + '01-01', today] }[el.dataset.v];
+    $('#tFrom').value = from; $('#tTo').value = to; loadTable();
+  },
+  tableSort: el => { const t = S.table; if (t.sort === el.dataset.v) t.desc = !t.desc; else { t.sort = el.dataset.v; t.desc = false; } renderSheet(); },
+  tableCsv: () => { download(`訂金總表_${L.twNow().date}.csv`, L.toCsv(sheetRows(), ORDER_COLS)); toast('已下載'); },
   filter: el => { S.filter = el.dataset.v; renderList(); },
   open: el => openDetail(el.dataset.no),
   history: el => run(el, async () => { const q = S.q.trim().toLowerCase(); S.history = { q, rows: await S.ops.search(q) }; renderList(); }),
@@ -494,7 +576,7 @@ const ACT = {
   submitForm: el => run(el, async () => {
     if (S.edit) { const o = await S.ops.updateOrder(S.edit.orderNo, readForm()); toast('已儲存'); return reload(o); }
     const card = $('#fAmt').closest('.card');
-    const order = await S.ops.createOrder({ ...readForm(), payment: { ...readPay(card), amount: $('#fAmt').value, invoiceNo: $('#fInv').value } });
+    const order = await S.ops.createOrder({ ...readForm(), payment: { ...readPay(card), amount: $('#fAmt').value, invoiceNo: $('#fInv') ? $('#fInv').value : '' } });
     go('done', order);
   }),
   edit: () => go('form', S.cur.order),
@@ -503,11 +585,11 @@ const ACT = {
   stage: el => run(el, async () => { const o = await S.ops.setStage(S.cur.order.orderNo, el.dataset.v); toast(`已更新為「${L.STAGE_LABEL[o.stage]}」`); return reload(o); }),
   mPay: () => MODALS.mPay(), mClose: () => MODALS.mClose(), mCancel: () => MODALS.mCancel(), mVoid: () => MODALS.mVoid(),
   doPay: el => run(el, async () => {
-    const o = await S.ops.addDeposit(S.cur.order.orderNo, { ...readPay($('#modalBody')), amount: $('#mAmt').value, invoiceNo: $('#mInv').value });
+    const o = await S.ops.addDeposit(S.cur.order.orderNo, { ...readPay($('#modalBody')), amount: $('#mAmt').value, invoiceNo: $('#mInv') ? $('#mInv').value : '' });
     closeModal(); toast('已收款'); return reload(o);
   }),
   doClose: el => run(el, async () => {
-    const o = await S.ops.closeOrder(S.cur.order.orderNo, { ...readPay($('#modalBody')), totalPrice: $('#mTotal').value, invoiceNo: $('#mInv').value });
+    const o = await S.ops.closeOrder(S.cur.order.orderNo, { ...readPay($('#modalBody')), totalPrice: $('#mTotal').value, invoiceNo: $('#mInv') ? $('#mInv').value : '' });
     closeModal(); toast('結帳完成'); return reload(o);
   }),
   doCancel: el => run(el, async () => {
@@ -545,7 +627,7 @@ const ACT = {
     await S.ops.saveStaff(r.uid, { ...r, active: !r.active }); renderSettings();
   }),
   saveSettings: el => run(el, async () => {
-    S.settings = await S.ops.saveSettings({ shopName: $('#cShop').value, methods: $('#cMethods').value, sources: $('#cSources').value, holdDays: $('#cHold').value, terms: $('#cTerms').value });
+    S.settings = await S.ops.saveSettings({ shopName: $('#cShop').value, methods: $('#cMethods').value, sources: $('#cSources').value, holdDays: $('#cHold').value, terms: $('#cTerms').value, useInvoice: $('#cInv').value === '1' });
     $('#shop').textContent = S.settings.shopName; toast('已儲存');
   }),
   integrity: el => run(el, async () => {
@@ -567,15 +649,29 @@ document.addEventListener('click', e => {
     return;
   }
   if (e.target.id === 'modal') closeModal();
+  const row = e.target.closest('#sheet tbody tr');
+  if (row && !e.target.closest('input')) openDetail(row.dataset.no);
 });
 document.addEventListener('input', e => {
   const id = e.target.id;
   if (id === 'q') { S.q = e.target.value; renderList(); }
+  else if (id === 'tq') { S.table.q = e.target.value; renderSheet(); }
   else if (id === 'mTotal') updateTail();
   else if (id === 'mRefund') $('#mForfeit').textContent = money(Math.max(S.cur.order.held - (Number(e.target.value) || 0), 0));
   else if (e.target.closest('#items') || id === 'fAmt') updateFormSum();
 });
 document.addEventListener('change', async e => {
+  if (e.target.dataset.post) { // 總表上的轉記勾選
+    const box = e.target, no = box.dataset.post;
+    box.disabled = true;
+    try {
+      const o = await S.ops.setPosted(no, box.checked);
+      (S.table.rows || []).concat(S.open).filter(r => r.orderNo === no).forEach(r => { r.posted = o.posted; });
+      toast(o.posted ? '已標記轉記' : '已取消轉記');
+    } catch (err) { box.checked = !box.checked; toast(err.message, true); }
+    box.disabled = false;
+    return;
+  }
   if (e.target.id !== 'fPhone' || S.edit || $('#fName').value.trim()) return;
   try { const name = await S.ops.findCustomer(e.target.value); if (name && $('#fName') && !$('#fName').value.trim()) { $('#fName').value = name; toast(`老客戶：${name}`); } } catch { /* 查不到就手動輸入 */ }
 });

@@ -3,7 +3,7 @@
 export const STATUS_LABEL = { active: '進行中', closed: '已取貨', refunded: '已退訂', void: '已作廢' };
 export const STAGE_LABEL = { ordered: '待到貨', arrived: '已到貨', notified: '已通知' };
 export const TYPE_LABEL = { deposit: '訂金', tail: '尾款', refund: '退款', forfeit: '沒收' };
-export const ROLE_LABEL = { manager: '經理', staff: '店員' };
+export const ROLE_LABEL = { manager: '經理', staff: '店員', accountant: '會計' };
 
 export const DEFAULT_SETTINGS = {
   shopName: '台灣 NAPS 新北店',
@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS = {
   sources: ['門市', '蝦皮', 'FB', 'LINE', '電話'],
   holdDays: 30,
   taxRate: 5,
+  useInvoice: true, // 是否另外開立發票（顯示發票號碼欄位）
   terms: '本訂金於取貨時全額折抵貨款。請於保留期限內取貨，逾期或退訂依本店規定辦理。'
 };
 
@@ -92,7 +93,7 @@ export function searchKeys(o) {
   add(o.orderNo); add(o.orderNo.split('-').slice(1).join('-')); add(o.orderNo.split('-').pop());
   add(o.phone); if (o.phone.length >= 4) { add(o.phone.slice(-4)); add(o.phone.slice(-3)); }
   add(o.customer); add(o.customer.replace(/\s/g, ''));
-  add(o.legacyNo); add(o.depositInvoice); add(o.finalInvoice);
+  add(o.legacyNo); add(o.finalInvoice); String(o.depositInvoice || '').split('、').forEach(add);
   return [...keys];
 }
 
@@ -108,6 +109,18 @@ export function sums(txs) {
   });
   s.netDeposit = s.deposit - s.refunded - s.forfeited;
   return s;
+}
+
+/** 帳本上方的四個合計：前受金總計、已精算、取消、未精算（已作廢的不計）。 */
+export function ledgerTotals(orders) {
+  const t = { count: 0, deposit: 0, settled: 0, cancelled: 0, open: 0 };
+  orders.forEach(o => {
+    if (o.status === 'void') return;
+    t.count++; t.deposit += o.deposit; t.open += o.held;
+    if (o.status === 'closed') t.settled += o.applied;
+    if (o.status === 'refunded') t.cancelled += o.refunded + o.forfeited;
+  });
+  return t;
 }
 
 export function isOverdue(o, today) { return o.status === 'active' && !!o.holdUntil && o.holdUntil < today; }

@@ -16,6 +16,18 @@ export function createOps(store, ctx) {
     if (u.role !== 'manager') throw new Error('這個操作需要經理帳號');
     return u;
   };
+  /** 會動到訂金單的操作：店員與經理可用，會計不可。 */
+  const seller = () => {
+    const u = me();
+    if (u.role === 'accountant') throw new Error('會計帳號只能查看、轉記與匯出');
+    return u;
+  };
+  /** 轉記與匯出：經理與會計可用。 */
+  const bookkeeper = () => {
+    const u = me();
+    if (u.role !== 'manager' && u.role !== 'accountant') throw new Error('這個操作需要經理或會計帳號');
+    return u;
+  };
   const cfg = () => ctx.settings();
   const audit = (t, u, action, orderNo, detail) => t.add('audit', {
     time: L.twNow().time, ts: store.serverTime(), staff: u.name, staffUid: u.uid, action, orderNo,
@@ -60,7 +72,7 @@ export function createOps(store, ctx) {
   return {
     /** 收訂金：配號、建單、寫入第一筆訂金，一次完成。 */
     async createOrder(p) {
-      const u = me(), f = orderFields(p), pay = payment(p.payment || {}, '訂金金額');
+      const u = seller(), f = orderFields(p), pay = payment(p.payment || {}, '訂金金額');
       if (f.totalPrice > 0 && pay.amount > f.totalPrice) throw new Error('訂金不能超過商品總價');
       const now = L.twNow();
       return store.tx(async t => {
@@ -69,7 +81,7 @@ export function createOps(store, ctx) {
         const orderNo = L.makeOrderNo(cfg().prefix, now.key, n);
         if (await t.get('orders', orderNo)) throw new Error('單號重複，請再按一次');
         const order = { orderNo, status: 'active', stage: 'ordered', createdAt: now.time, bizDate: now.date, ...f,
-          deposit: pay.amount, tail: 0, refunded: 0, forfeited: 0, held: pay.amount, applied: 0,
+          deposit: pay.amount, tail: 0, refunded: 0, forfeited: 0, held: pay.amount, applied: 0, payMethods: pay.method,
           arrivedAt: '', notifiedAt: '', closedAt: '', closedBy: '', depositInvoice: pay.invoiceNo, finalInvoice: '',
           legacyNo: '', posted: false, createdBy: u.name, createdByUid: u.uid, updatedAt: now.time, txCount: 1 };
         order.keys = L.searchKeys(order);
@@ -82,11 +94,15 @@ export function createOps(store, ctx) {
     },
 
     async addDeposit(orderNo, p) {
-      const u = me(), pay = payment(p, '訂金金額');
+      const u = seller(), pay = payment(p, '訂金金額');
       return store.tx(async t => {
         const o = await loadActive(t, orderNo);
         if (o.totalPrice > 0 && o.held + pay.amount > o.totalPrice) throw new Error('累計訂金不能超過商品總價');
-        const patch = { deposit: o.deposit + pay.amount, held: o.held + pay.amount, txCount: o.txCount + 1, updatedAt: L.twNow().time };
+        const methods = (o.payMethods || '').split('、').filter(Boolean);
+        if (!methods.includes(pay.method)) methods.push(pay.method);
+        const patch = { deposit: o.deposit + pay.amount, held: o.held + pay.amount, txCount: o.txCount + 1, updatedAt: L.twNow().time,
+          payMethods: methods.join('、'), depositInvoice: [o.depositInvoice, pay.invoiceNo].filter(Boolean).join('、') };
+        patch.keys = L.searchKeys({ ...o, ...patch });
         t.update('orders', o.orderNo, patch);
         writeTx(t, u, o, o.txCount + 1, 'deposit', pay);
         audit(t, u, '追加訂金', o.orderNo, { 金額: pay.amount, 方式: pay.method });
@@ -96,7 +112,7 @@ export function createOps(store, ctx) {
 
     /** 標記到貨／已通知（也可改回前一階段）。 */
     async setStage(orderNo, stage) {
-      const u = me();
+      const u = seller();
       if (!L.STAGE_LABEL[stage]) throw new Error('階段不正確');
       return store.tx(async t => {
         const o = await loadActive(t, orderNo), today = L.twNow();
@@ -111,7 +127,7 @@ export function createOps(store, ctx) {
 
     /** 取貨結帳：訂金全額折抵，收尾款（可為 0），結案。 */
     async closeOrder(orderNo, p) {
-      const u = me(), totalPrice = L.toInt(p.totalPrice, '商品總價');
+      const u = seller(), totalPrice = L.toInt(p.totalPrice, '商品總價');
       return store.tx(async t => {
         const o = await loadActive(t, orderNo), tailAmt = totalPrice - o.held;
         if (tailAmt < 0) throw new Error(`商品總價低於已收訂金 ${o.held} 元，請先確認金額`);
@@ -171,7 +187,7 @@ export function createOps(store, ctx) {
     },
 
     async updateOrder(orderNo, p) {
-      const u = me(), f = orderFields(p);
+      const u = seller(), f = orderFields(p);
       return store.tx(async t => {
         const o = await loadActive(t, orderNo);
         if (f.totalPrice > 0 && f.totalPrice < o.held) throw new Error(`商品總價不能低於已收訂金 ${o.held} 元`);
@@ -188,9 +204,9 @@ export function createOps(store, ctx) {
       });
     },
 
-    /** 會計轉記勾選。限經理。 */
+    /** 會計轉記勾選：會計把這張單抄到自己的帳本後勾選。限經理與會計。 */
     async setPosted(orderNo, posted) {
-      const u = needManager();
+      const u = bookkeeper();
       return store.tx(async t => {
         const o = await t.get('orders', String(orderNo));
         if (!o) throw new Error(`找不到訂金單 ${orderNo}`);
@@ -253,8 +269,15 @@ export function createOps(store, ctx) {
       return bad;
     },
 
+    /** 總表：依受注日區間列出訂金單（含已結案）。 */
+    async listOrders(from, to) {
+      me();
+      const rows = await store.query('orders', [['bizDate', '>=', L.cleanDate(from, '開始')], ['bizDate', '<=', L.cleanDate(to, '結束')]]);
+      return rows.sort((a, b) => (a.orderNo < b.orderNo ? 1 : -1));
+    },
+
     async exportAll() {
-      needManager();
+      bookkeeper();
       const [orders, txs] = await Promise.all([store.query('orders'), store.query('transactions')]);
       orders.sort((a, b) => (a.orderNo < b.orderNo ? -1 : 1));
       txs.sort((a, b) => (a.txId < b.txId ? -1 : 1));
@@ -266,7 +289,7 @@ export function createOps(store, ctx) {
       const list = v => [...new Set(String(v || '').split(/[,，、\n]/).map(s => L.cleanText(s, 30)).filter(Boolean))];
       const s = { ...cfg(), shopName: L.cleanText(p.shopName, 40) || cfg().shopName,
         methods: list(p.methods), sources: list(p.sources),
-        holdDays: L.toInt(p.holdDays, '保留天數', { allowZero: true }), terms: L.cleanText(p.terms, 400) };
+        holdDays: L.toInt(p.holdDays, '保留天數', { allowZero: true }), terms: L.cleanText(p.terms, 400), useInvoice: !!p.useInvoice };
       if (!s.methods.length) throw new Error('至少要有一種支付方式');
       await store.set('settings', 'main', s);
       return s;

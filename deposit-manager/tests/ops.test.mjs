@@ -142,3 +142,26 @@ test('修改資料留下異動紀錄；查詢；老客戶帶入；一致性檢�
   assert.equal((await ops.integrityCheck(true)).length, 1);
   assert.equal((await ops.getOrder(o.orderNo)).order.held, 3000);
 });
+
+test('會計：只能查看、轉記、匯出；總表與帳本合計', async () => {
+  const { ops, user } = setup();
+  const a = await ops.createOrder(base());
+  await ops.addDeposit(a.orderNo, { method: '信用卡', amount: 1000, invoiceNo: 'ab12345678' });
+  const b = await ops.createOrder(base({ payment: { method: '信用卡', amount: 5000 } }));
+  await ops.cancelOrder(b.orderNo, { refundAmount: 4000, method: '信用卡', reason: '缺貨' });
+  const c = await ops.createOrder(base());
+  await ops.closeOrder(c.orderNo, { totalPrice: 19600, method: '現金' });
+  user.role = 'accountant';
+  await assert.rejects(ops.createOrder(base()), /會計/);
+  await assert.rejects(ops.addDeposit(a.orderNo, { method: '現金', amount: 1 }), /會計/);
+  await assert.rejects(ops.closeOrder(a.orderNo, { totalPrice: 19600, method: '現金' }), /會計/);
+  await assert.rejects(ops.voidOrder(a.orderNo, { reason: 'x' }), /經理/);
+  assert.equal((await ops.setPosted(a.orderNo, true)).posted, true);
+  const today = L.twNow().date, rows = await ops.listOrders(today, today);
+  assert.equal(rows.length, 3); assert.equal(rows.find(r => r.orderNo === a.orderNo).payMethods, '現金、信用卡');
+  assert.deepEqual(L.ledgerTotals(rows), { count: 3, deposit: 12000, settled: 3000, cancelled: 5000, open: 4000 });
+  assert.equal((await ops.exportAll()).orders.length, 3);
+  assert.equal((await ops.search('AB12345678')).length, 1);
+  user.role = 'staff';
+  await assert.rejects(ops.setPosted(a.orderNo, false), /經理或會計/);
+});
